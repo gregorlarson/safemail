@@ -1,5 +1,10 @@
 # safemail
 Sanitize email contents for forwarding to less secure zone or SMS.
+# Background
+## E-Mail as Identity and Authentication
+Many companies and organization use E-Mail as a proxy for identification. They use the email address to validate the identity of the Person, Company or Organization accessing their system. This relationship is usually established during the account signup. The user is required to enter a valid email address into a web form along with their other identity information, and a code or URL containing a code is sent to the email address. When the user follows the URL in the email or provides the code number back to a web-page this validates that the relationship between the account and that email address.
+
+Later, if there is an authenication problem with that account, because the password has been forgotten, or stolen, then the email address is used re-set the password and re-establish ownership of the account.
 
 This utility can be used with a local delivery agent (LDA) like postfix or procmail to process the contents of an email message in order to remove attachments, html sections and message text that presents a security risk.
 
