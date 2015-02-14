@@ -1,0 +1,1020 @@
+#!/usr/bin/python
+
+# Currently we don't use mailbox because we are handling
+# a single email.
+from __future__ import print_function
+import os,sys,random,cStringIO,email
+
+re_setup_done=False
+def setup_re():
+   '''Setup module global regular expressions.'''
+   if re_setup_done: return
+
+   # Any string of more than 4 consecutive digits will be considered a code.
+   # Any url could be a code, however, if the URL does not contain a lot of
+   # material after the domain/ then it might be safe.
+
+#
+# The following several functions deal with trying to figure out
+# whether some email contains a code or verification URL that could
+# cause damage.
+#
+# Of course the logic is a bit fuzzy and error-prone, especially for
+# non text/plain emails. Use of this logic is optional. It's use is
+# controlled by the --digits, --allow and --otp flags on the command-line.
+# Without those flags, the following logic will not be used.
+#
+# For performance reasons I have elected to use the bytearray type to
+# hold and pass strings which will manipulated, stripped, and obscured
+# in various ways. The bytearry, unlike the str type is mutable and my
+# hope is that store management (garbage collection) will be minimized
+# by modifying the bytearray in-place.
+#
+def lens(txt):
+   '''Count number of digits, letters, punctuation in some text.
+   Returns (digits,lower,upper,punc,late_upper,middle_digits) where
+   late_capitals are capital letters that come after lower-case letters
+   and middle_digits are digits in the middle of the word (with letters
+   before and after).
+   The values returned are used for fuzzy entropy logic.
+   TODO: create a formal entropy scanner.
+   txt is a bytearray, not changed.'''
+   digits=0
+   lower=0
+   upper=0
+   late_upper=0		# upper case after lower case
+   punc=0		# includes colon and non letters and numbers
+   # colon is counted separately because it is not a valid
+   # component of a host-name or email address and when it appears
+   # in the middle of a word it is more likely be indicate a code
+   # of some kind.
+   colon=0
+
+   letters=False
+   digits_after_letters=0
+   middle_digits=0
+   for v in txt:
+      if v > 125:
+         # For now, igore extended ascii and non-printable chars
+         continue
+
+      c=chr(v)
+      if c <= ' ':
+         # ignore white space and control chars.
+         continue
+      if c < '0':
+         punc += 1
+      elif c <= '9':
+         digits += 1
+         if letters: digits_after_letters += 1
+      elif c < 'A':
+         if c == ':': colon += 1
+         punc += 1
+      elif c <= 'Z':
+         upper += 1
+         middle_digits += digits_after_letters
+         digits_after_letters=0
+
+         letters=True
+         if lower > 0: late_upper += 1
+      elif c < 'a':
+         punc += 1
+      elif c <= 'z':
+         lower += 1
+         middle_digits += digits_after_letters
+         digits_after_letters=0
+
+         letters=True
+      else:
+         punc += 1
+
+   return (digits,lower,upper,punc,colon,late_upper,middle_digits)
+
+def is_code_log(word):
+  if len(word.strip()) == 0: raise UserWarning
+  if word[:4] == '&gt;': raise UserWarning(word)
+
+def is_code_trace(word,digits,rc):
+  '''TODO: use this to create a tool that allows me to inspect
+  where in is_code various words are being classified.'''
+
+  return rc
+
+is_code_debug=0
+def is_code_log_debug(orig,word,risk):
+   if risk >= is_code_debug-1:
+      print("is_code(%d): '%s' ::: '%s'" % (risk,word,orig), file=sys.stderr)
+
+if os.environ.has_key('SAFEMAIL_DEBUG_IS_CODE'):
+   is_code_debug=int(os.environ['SAFEMAIL_DEBUG_IS_CODE'])
+
+def is_code_wonder(word):
+  if is_code_debug:
+     print("                                                ?:",word,file=sys.stderr)
+
+# is_code return values indicating what was detected (ordered by risk).
+# 0 (False) don't think this is a code (may have digits, but not many)
+is_code_SIMPLE=1	# base-10 5+ digits (> codemin)
+is_code_NUMBER=2	# base-10 6+ digits (> longmin)
+#is_code_URL=3		# a non-complicated URL
+is_code_HEX=4		# base-16 32+ bits
+is_code_SHORTCODE=5	# base-32 30+ bits, or base-64 36+ bits
+is_code_LONGCODE=6	# base-32 40+ bits, or base-64 48+ bits
+is_code_LETTERCODE=7	# Some letter code without digits
+#is_code_URLCODE=7	# includes a complicated URL with higher entropy (DANGER)
+
+# I would like to consider '/' punctuation, because it is used a lot in
+# html, however, it is also used in base64. I have to allow dot comma
+# colon semi-colon because they are used to much in english.
+
+leading_punc=bytearray('*<"$(#+=[{'+"' \t\r")
+trailing_punc=bytearray('*.?:;,)]}!%>"'+"' \t\r")
+
+def strip_punc(word):
+   '''Strip leading/trailing low-entropy punctuation from word.
+   word is a bytearray which is modified (consumed) in-place.'''
+
+   if not isinstance(word,bytearray):
+      raise TypeError(type(word))	# wrong type, only support bytearray
+
+   if not word: return	# empty
+   for _ in range(4):
+      # Strip some trailing punctuation that typically would not add
+      # any code entropy
+      if word[-1] in trailing_punc:
+         del word[-1]
+         if not word: return	# empty
+
+      # For now, I will consider non-printing and extended ascii chars
+      # to be not relevant because if the user can't really see them or
+      # type them, they can't disclose much, also, I don't think a URL
+      # would work with these.
+
+      if word[-1] < 32 or word[-1] > 125:
+         del word[-1]
+         if not word: return	# empty
+
+      if word[0] < 32 or word[0] > 125:
+         del word[0]
+         if not word: return	# empty
+
+      # Strip some leading puctuation that typically would not add
+      # any code entropy
+      if word[0] in leading_punc:
+         del word[0]
+         if not word: return	# empty
+
+def strip_cents(word):
+   '''Indicate if a string is numeric and ends in dot number number
+   such that it might be a price value in many parts of the world, and
+   therefor less likely to be a code. Note that any other non-digit char
+   will make this false. There is an assumption that any leading or trailing
+   punctuation or symbol is stripped prior. word is a bytearray that is
+   modified in-place (for performance). True/False is returned to indicate
+   if word was modified.'''
+
+   if len(word) < 3:			return False
+   if word[-3] != ord('.'):		return False
+    
+   if len(word) > 3:
+      # check digits before dot
+      if not word[:-3].isdigit():	return False
+
+   # check digits after dot
+   if not word[-2:].isdigit():		return False
+   
+   del word[-3:]	# delete the dot cents
+   return True		# return True to indicate modification
+
+# The follow logic strips html chaf from words.
+# It could be used with the --allow option to pass
+# more html cleanly. In reality, only a fairly simple
+# html page will pass the filter. The only way
+# I can see to really sanitize the html would be to
+# parse it all, find text and URLs and sanitize those
+# parts, however, even that would be error-prone I think.
+
+# words that might appear (after stripping punctuation)
+# for common prefix, put longer word first.
+# Do NOT absorbe URLs here (http: mailto: etc) that may appear
+# in text/plain sections.
+#
+html_prefix=[
+ '!--',
+ '1px;',
+ '6px;',
+ '10px;',
+ 'a2Column',
+ 'a3Column',
+ 'a4Column',
+ 'align',
+ 'antialiased',
+ 'alt=',
+ 'arial',
+ 'Arial',
+ 'bgcolor',
+ 'block',
+ 'bold',
+ 'border-radius',
+ 'border',
+ 'campaign',
+ 'cellspacing',
+ 'cellpadding',
+ 'color',
+ 'colspan',
+ 'charset',
+ 'classification',
+ 'class',
+ 'family',
+ 'font-family',
+ 'font-size',
+ 'font-weight',
+ 'height',
+ 'helvetica',
+ 'Helvetica',
+ 'href=',
+ 'http-equiv',
+ 'id=',
+ 'isInlineSafe',
+ 'leftmargin',
+ 'left',
+ 'line-height',
+ 'margin-top',
+ 'margin',
+ 'name',
+ 'none',
+ 'padding-right',
+ 'padding',
+ 'priority',
+ 'right',
+ 'sans-serif',
+ 'src=',
+ 'style',
+ 'target',
+ 'text-align',
+ 'text-decoration',
+ 'top_meta',
+ 'top;',
+ 'topmargin',
+ 'title',
+ 'Transitional',
+ 'underline',
+ 'valign',
+ '_blank',
+ 'width',
+ ]
+html_word_punc=bytearray('=:;>,')
+
+html_suffix=['</a','</div','</p','</span','<table','</td','text-decoration']
+
+def strip_htmlword(word):
+   '''Remove some html words and puntucation.
+   word is a bytearray, modified in-place (for performance).
+   True/False is returned to indicate if any changes were
+   made.'''
+
+   modified=False
+
+   for _ in range(2):
+      for prefix in html_prefix:
+         if len(word) < 4:	return modified	# empty
+         pl=len(prefix)
+         if word[:pl] == prefix:
+            del word[:pl]
+            modified=True
+            if not word:	return modified	# empty
+            if word[0] in html_word_punc:
+               del word[0]
+            strip_punc(word)
+
+      for suffix in html_suffix:
+         if len(word) < 4:	return modified	# empty
+         sl=len(suffix)
+         if word[-sl:] == suffix:
+            del word[-sl:]
+            modified=True
+            strip_punc(word)
+
+   return modified
+
+def is_code(word,codemin=4,longmin=5,allow_html=False):
+   '''Judge whether a word is a code based on characters it contains.
+   In particular, we are looking for numbers
+   in base 10, 16, 32 or 64.
+   Note that this is normally used with words
+   that have leading and trailing punctuation stripped in order to avoid
+   false positives. See also strip_punc function.
+   word is a bytearray which is consumed (modified) in-place.
+   An integer (enum) is returned to provide the risk estimate.'''
+   if not isinstance(word,bytearray):
+      raise TypeError(type(word))
+
+   # Note: strip_punc must be done by caller prior to first invocation of this
+   #       this function, however, we don't do it here because there is some
+   #       word-splitting and recursive calls where we don't want it done.
+
+   # if allow_currency?
+   cents = strip_cents(word)
+
+   if allow_html:
+      htmlword=strip_htmlword(word)
+   else:
+      htmlword=False
+
+   # Note that some URLs appear in text/plain messages because the are
+   # understood by people and machines.
+
+   if word[:7] == 'mailto:':
+      mailto=True
+      del word[:7]
+      strip_punc(word)
+      # Splitting of the email address is done below, provided
+      # there are not to many digits.
+   else:
+      mailto=False
+
+   httpurl=False
+   if word[:7] == 'http://':
+      httpurl=True
+      del word[:7]
+   elif word[:8] == 'https://':
+      httpurl=True
+      del word[:8]
+
+   if httpurl:
+      sep=word.find('/')
+      if sep > 0:
+         httpurl_host=word[:sep]	# includes :port
+         del word[:sep+1]
+         # word now contains what comes after the /
+
+   (digits,lower,upper,punc,colon,lateup,mid_digs)=lens(word)
+   letters=lower+upper
+   wl=len(word)
+
+   if letters + digits < codemin: return 0		# junk only
+
+   if digits <= codemin and colon==0:
+      hyph2=word.split('-')
+      if len(hyph2) == 2:
+         #print("hyph2-:",hyph2,file=sys.stderr)		#DEBUG
+         # exactly 2 parts, recurse
+         if is_code(hyph2[0],codemin=codemin-1) == 0:
+            if is_code(hyph2[1],codemin=codemin-1) == 0:
+               return 0   # let simple 2-part hyphon with almost no digits go
+
+      if colon==0 and ( punc < 6 or mailto ):
+         hyph2=word.split('@')
+         if len(hyph2) == 2:
+            #print("hyph2@:",hyph2,file=sys.stderr)		#DEBUG
+            # exactly 2 parts, recurse
+            if is_code(hyph2[0],codemin=codemin-1) == 0:
+               if is_code(hyph2[1],codemin=codemin-1) == 0:
+                  return 0   # let simple 2-part @ email with almost no digits go
+      
+      # Few digits
+      # In many ways, we should tree this like zero digits.
+
+      # No digits is probably the easiest case, however, the no-digits case
+      # is also a problem if we are obscuring codes by zapping digits.
+      # For this reason, for zero digits, we should log and figure out
+      # if some codes will get past the filter.
+      #
+      if letters < 9:
+         if digits==0 and punc==0:
+            # acronyms and abbreviations
+            return 0
+
+      if letters < 5:
+         # 0-4 letters, plus some digits maybe.
+         # short word, could be a date, postal-code etc.
+         if digits==0:
+            return 0	# punc junk or acronym
+
+         # some digits
+         if punc > 1 and lateup > 1:
+            return is_code_SHORTCODE
+         if punc > 2:
+            return is_code_SHORTCODE
+         if lateup > 2:
+            return is_code_SHORTCODE
+
+         return 0
+            
+      if wl < 10:
+         # 5-9 chars, may include some digits.
+
+         if lateup > 1:
+            # odd capitalization
+            if digits==0: is_code_log(word)
+            return is_code_SHORTCODE
+
+         if upper > 2 and lower > 2:
+            # odd capitalization
+            if digits==0: is_code_log(word)
+            return is_code_SHORTCODE
+
+         if digits > 0 and upper > 1 and lower > 2:
+            # kind of mixed up for a real word
+            return is_code_SHORTCODE
+
+         if digits > 0 and lateup > 0:
+            # kind of mixed up for a real word
+            return is_code_SHORTCODE
+
+         if colon>1 and digits>1:
+            return is_code_SHORTCODE
+
+         if punc > 2:
+            if digits==0: is_code_log(word)
+            return is_code_SHORTCODE
+
+         return 0
+
+      # 10-18 chars. Allow some long words through.
+      if digits==0 and lateup==0 and upper<2:
+         # just a normal word
+         return 0
+
+      if digits==0 and upper<4 and punc==0:
+         # CamelCaseJunk
+         return 0	# a bit risky, but let it go.
+
+      if digits==0 and lower==0 and punc==0:
+         # just an upper-case word
+         return 0
+
+      if wl < 14:
+         # 10-13 chars. Well, now we have to wonder.
+         if lateup > 0 and punc > 1:
+            if digits==0: is_code_log(word)
+            return is_code_LONGCODE
+         if upper > 3 and lower > 3:
+            if digits==0: is_code_log(word)
+            return is_code_LONGCODE
+         if lateup > 3:
+            if digits==0: is_code_log(word)
+            return is_code_LONGCODE
+         if lower == 0 and punc == 0:
+            # long upper-case, no hyphons
+            if digits==0: is_code_log(word)
+            return is_code_LONGCODE
+
+         if digits > 0 and upper > 2 and lower > 3:
+            # kind of mixed up for a real word
+            return is_code_LONGCODE
+
+         if digits > 0 and lateup > 1:
+            # kind of mixed up for a real word
+            return is_code_LONGCODE
+
+         if punc > 2 and upper > 2 and lower > 2:
+            # kind of mixed up for a real word
+            if digits==0: is_code_log(word)
+            return is_code_LONGCODE
+
+         if punc > 3 and upper > 1 and lower > 1:
+            # kind of mixed up for a real word
+            if digits==0: is_code_log(word)
+            return is_code_LONGCODE
+
+         if mid_digs > 0:
+            return is_code_LONGCODE
+
+         # I wonder what these log words are. Perhaps I could create
+         # some automatic white list?
+         is_code_wonder(word)
+         return 0	# let it go, I guess
+
+      if wl > 18:
+         # to long to be a word, could allow for email address I supposed.
+         if digits==0: is_code_log(word)
+
+      # 14+ chars seems pretty suspicious (for English)
+      # If it had some hyphons, maybe.....
+      # We could add a check here to allow non-complicated URL if we
+      # wanted to......
+      # We could add a check here to allow an email address.
+
+      if upper > 3 and lower > 4:
+         if digits == 0: is_code_log(word)
+         return is_code_LONGCODE
+
+      if digits > 0 and upper > 1 and lower > 1:
+         return is_code_LONGCODE
+
+      if digits > 2 and upper > 2 and lower > 2:
+         return is_code_LONGCODE
+
+      if digits > 3:
+         return is_code_LONGCODE
+
+      if mid_digs > 1:
+         return is_code_LONGCODE
+
+      if punc>0 and punc<3 and lateup==0 and wl<18 and (upper==0 or lower==0):
+         is_code_wonder(word)
+         return 0	# let it go, could just be a domain or hyphenated
+         
+      # Here I could allow for a non-complex URL or email address
+      if digits == 0: is_code_log(word)
+      return is_code_LONGCODE
+
+   # More digits than allowed (>codemin)
+   if digits <= longmin:
+      # but not a huge number of digits.
+      # So here is where we allow for a phone number, numeric date, especially
+      # if the --otp flag is used (which will increase longmin).
+      # By returning SIMPLE or NUMBER to that code.
+
+      if letters == 0 and punc < 2:
+         return is_code_SIMPLE
+
+      if letters < 3 and lateup==0 and mid_digs==0:
+         return is_code_SIMPLE
+
+      if wl < longmin+6:
+         # The follow two are probably the risky ones for allowing a code
+         # in that is more than a OTP.
+         #
+         if letters < 4 and punc < 4 and lateup == 0 and mid_digs==0:
+            return is_code_NUMBER
+
+         if letters < 6 and punc < 4 and (upper == 0 or lower == 0) and mid_digs==0:
+            return is_code_NUMBER
+
+         return is_code_SHORTCODE
+
+      return is_code_LONGCODE
+
+   # Excessive digits (>longmin)
+   if letters == 0 and punc < 2:
+      return is_code_SHORTCODE
+
+   if letters < 3:
+      return is_code_SHORTCODE
+
+   # lots of letters and digits
+   return is_code_LONGCODE
+
+   # END is_code
+
+def is_safe(txtline,allow_otp,allow_html):
+   '''Analyse a line of text to see if it contains something that may
+      be an unsafe code. txtline may be str or bytearray, we don't change it.'''
+   if allow_otp:
+      longmin=11
+      codemin=6
+   else:
+      longmin=5
+      codemin=4
+
+   # For performance, use bytearray.
+   # TODO: try a bytearray split generator
+   if not isinstance(txtline,bytearray):
+      txtline=bytearray(txtline)
+
+   code=0
+   orig=bytearray()
+   for word in txtline.split():
+      if is_code_debug:		orig[0:]=word
+
+      strip_punc(word)
+      n = is_code(word,longmin=longmin,allow_html=allow_html)
+
+      if is_code_debug:		is_code_log_debug(orig,word,n)
+
+      if n > code: code=n
+
+   #print("is_safe(%d)" % (code),txtline,file=sys.stderr) #DEBUG
+
+   if allow_otp:
+      if code > is_code_NUMBER: return False
+      return True
+
+   # Not clear if we want to allow SIMPLE
+   # If we assume emailed OTP are at least 6 digits, then we are OK, however,
+   # if some mechanisms email shorter OTP, then they would get through, in which
+   # case we need to reduce longmin or not allow is_code_SIMPLE
+   #
+   if code > is_code_SIMPLE: return False
+   return True
+
+# TODO: create an in-place entropy munger which does the is_safe and
+#       word-by-word obscuring all in one pass and uses an external
+#	dictionary for common long words... :) like I have time
+#	for that. Good luck. This would add the parameters
+#	allow_digits, allow_otp, any maybe codemin and longmin also.
+
+def hidecodes(txt):
+   '''Obscure the codes in some text. Currently this works simply by
+   changing digits, however, that will not work if the code does not
+   contain digits. The txt must be a bytearray which is modified in-place.'''
+
+   #
+   #	This mechanism, should efficiently handle a high message
+   #	volume, such that this code could be used in module form to handle
+   #	many messages, rather than a single message per Python invocation.
+   #
+   #	To this end a bytearray is modified in-place (and returned).
+   #
+
+   if not isinstance(txt,bytearray):
+      raise TypeError(type(txt))	# wrong type, only support bytearray
+
+   nums=bytearray('0123456789')
+   # Instead of simply replacing all the numbers with a constant char
+   # I inject some noise to make it a bit harder to attack a base32 or
+   # base64 number with few digits.
+   #
+   noise=bytearray('xXlEOQZSD')
+
+   # TODO: investigate a static seed so the same message will
+   #       always hide in exactly the same way. This would prevent an
+   #       attack where the same message is provided to the filter several
+   #       times in order to discover exactly which characters are digits.
+   #
+   for (i,v) in enumerate(txt):
+     if v in nums:
+        txt[i] = random.choice(noise)
+
+   return txt
+
+def output_msgheader(msg,foward_mode,unaddressed,file=sys.stdout):
+   '''Output the email header, given an existing message.
+   This is really only going to handle a single-part message with
+   a content type of text/plain; ... For more sophisticated messages
+   the email module should be used to compose.
+   In forward_mode=True, only the Subject header is output, so additional
+   information must be provided to the the MTA in order to send this message.
+   In relay/redirect mode (forward_mode=False) all the message headers
+   are output (except Content-type) such that this message could be passed
+   to the MTA
+   without additional information, assuming the original message
+   was valid. Note that the CALLER must output a blank line after
+   the message header, prior to the body of the message.'''
+   if foward_mode:
+      print("Subject:",msg['subject'],file=file) # should be in header
+      return
+
+   for k in msg.keys():
+      if k.upper()[:8]=="CONTENT-": continue
+      if k.upper()[:4]=="MIME": continue
+      # It seems to me that most signatures will not be valid either
+      # because the message is modified..... The MTA would have to
+      # re-sign the message based on the new content, right?
+      if k.upper()[:9]=="DOMAINKEY": continue
+      if k.upper()[:4]=="DKIM": continue
+      if k.upper()[:13]=="AUTHENICATION": continue
+      if unaddressed:
+         if k.upper() == "TO": continue
+         if k.upper() == "FROM": continue
+         if k.upper() == "RETURN-PATH": continue
+         if k.upper() == "SENDER": continue
+         if k.upper() == "DELIVERED-TO": continue
+
+      print("%s:" % (k),msg[k],file=file)
+      
+def output_msgbody(payload,opt,note=None,forward_msg=None,file=sys.stdout):
+   '''Output a message body given a string payload.
+   The command opt, from argparse, or just any Namespace with fields:
+   safe - obscure codes, digits - allow digits, otp - allow otp.
+   Optionally add additional fields from provided forward_msg into the
+   message body. Note that caller must handle the message header and
+   output the blank line after the message header because this code
+   will suppress leading and trailing blank lines. 
+   Trailing white-space and repeated blank lines are deleted.
+   payload may be str or bytearry, it is not changed.'''
+
+   if forward_msg:
+      # In forward mode, some fields from the source message
+      # are included in the new message body.
+      # print(forward_msg.keys())
+      if opt.maxlen > 120:
+         extra="From: "+forward_msg['from']
+         elen=len(extra)+1
+         print(extra,file=file)
+         opt.maxlen -= elen
+
+         if opt.maxlen > 200:
+            extra="To: "+forward_msg['to']
+            elen=len(extra)+1
+            print(extra,file=file)
+            opt.maxlen -= elen
+         
+            if opt.maxlen > 360:
+               extra="Date: "+forward_msg['date']
+               elen=len(extra)+1
+               print(extra,file=file)
+               opt.maxlen -= elen
+         
+         print(file=file)
+
+   # Could we not simply do payload.split('\n')? Would that be more
+   # efficient? Split is not
+   # a generator, however, there are some generator implementation of
+   # str.split that might be applied....
+   # http://stackoverflow.com/questions/3862010/is-there-a-generator-version-of-string-split-in-python/12764478#12764478
+   # It would be interesting to try a generator that yields bytearray rather
+   # than string.
+   # Mind you, cStringIO is likely pretty good, and I believe it is a generator.
+   inf=cStringIO.StringIO(payload)
+  
+   leadin=True
+   blank=0
+
+   include_note=False
+   if note:
+      # A note was provided
+      elen=len(note) + 14
+      if opt.maxlen > 300:
+         # For longer max len, include note even if it truncates payload.
+         opt.maxlen -= elen
+         include_note=True
+      elif len(payload)+elen < opt.maxlen:
+         # For short max len, include note only if there is space.
+         include_note=True
+         opt.maxlen -= elen
+
+   trunc_note=None
+   truncated=False
+   if opt.maxlen > 270:
+      # longer messages get a truncated indication at the end.
+      if len(payload) > opt.maxlen:
+         # add a truncated message to longer messages
+         trunc_note='.truncated'
+         opt.maxlen -= 11
+
+   w=bytearray()
+   trailing_junk=bytearray('\n\r\t ')
+   for line in inf:
+      if opt.maxlen < 3:
+         truncated=True
+         break
+
+      # line is always str, but we put in bytearry for faster manipulation.
+      w[0:]=line
+      # remove trailing junk from line
+      while w and w[-1] in trailing_junk:	# assumes short-circut eval
+         del w[-1]
+
+      if not w:
+         if leadin:
+            continue		# suppress leading blank lines
+         blank += 1		# count blank line
+         continue
+
+      leadin=False
+      if blank > 0:
+         # collapse multiple blank lines to a single blank line.
+         print(file=file)
+         opt.maxlen -= 1
+         blank=0
+
+      if opt.safe:
+         if opt.digits or opt.otp:
+            if not is_safe(w,opt.otp,opt.allow):
+               hidecodes(w)	# hidecodes modifies w bytearray
+         else:
+            hidecodes(w)	# hidecodes modifies w bytearray
+
+      d=opt.maxlen - len(w)
+      if d < 0:
+         # Current line won't fit.
+         del w[d:]
+         truncated=True
+
+      print(w,file=file)
+      opt.maxlen -= (len(w)+1)
+
+   if truncated and trunc_note:
+      print(trunc_note,file=file)
+
+   if include_note:
+      print("-safemail---",note,file=file)
+      # length account for earlier
+
+def scantext(msg):
+   '''Extract the text/* parts of a multi-part message.
+   Returns a list of the text/plain, other text/ parts
+   and a count of all the parts.'''
+   pt=[]
+   other=[]
+   total=0
+   for part in msg.walk():
+      total += 1
+      ct=part["Content-Type"]
+      if ct[:10] == 'text/plain':
+         pt.append(part)
+      elif ct[:4] == 'text':
+         other.append(part)
+   return (pt,other,total)
+
+def multipart(msg,opt,file=sys.stdout):
+   '''Handle a multi-part message.
+   Takes the message and the command-line options. Note options
+   can be any Namespace or object which has the fields we want:
+   safe, forward, plain, allow, digits, otp'''
+
+   if opt.forward:
+      forward_msg=msg
+   else:
+      forward_msg=None
+
+   (plain,other,total) = scantext(msg)
+
+   # TODO: handle opt.allow (allow other text/)
+   # To properly pass multiple parts we would need to compose
+   # a new multi-part message using each content type and payload
+   # from the original message, after obscuring each payload, if
+   # required.
+
+   note=None
+   if len(plain) == 0:
+      # no plaintext portion
+
+      payload="none"
+      note="No text/plain in this %d part message" % (total)
+      rc=3	# no text/plain
+   else:
+      payload=plain[0].get_payload(decode=True)
+
+      rc=0
+      if len(plain) == 1:
+         note="single text/plain of %d parts" % (total)
+      else:
+         # there are multiple plaintext portions in this message.
+         #
+         remaining=len(plain)-1
+         for part in plain[1:]:
+            if len(payload) > opt.maxlen:
+               rc=2	# truncated
+               note="%d text/plain parts omitted." % (remaining)
+               break
+            remaining -= 1
+            payload += "\n---\n" + part.get_payload(decode=True)
+ 
+   output_msgheader(msg,opt.forward,opt.unaddressed,file=file)
+   print(file=file)
+   output_msgbody(payload,opt,note=note,forward_msg=forward_msg,file=file)
+   return rc
+
+# rc from main will be command exit code
+# 0 - normal
+main_rc_TRUNCATED=2	# Message was to long.
+# No content type text/plain, however, there may be
+# other text/html output depending on args.
+main_rc_NOPLAIN=3
+main_rc_NOCONTENT=4	# No content type on message, text/plain assumed.
+main_rc_NOTEXT=5	# No text, only the subject line will be used.
+main_rc_FAULT=6		# Failure.
+
+# TODO: add handling for sigpipe which can occur when sys.stdout or sys.stderr
+#       is a broken pipe.
+def main(args):
+   import argparse
+   parser = argparse.ArgumentParser(description=
+ 	'''Extract safe text/plain from email. A single bank line is output
+ 	between the headers and message body. Extra leading blank lines
+ 	from message body are removed. Extra trailing blank lines from the
+ 	message body are removed. Sequences of more than 2 blank links are
+ 	collapsed to a single blank line. The stdout from this script should
+ 	be passed to a message transport agent (MTA), for example sendmail.''')
+
+   parser.add_argument('--safe','-s',action='store_true', help=
+  	'''Only allow text/plain to pass through and obscure any codes
+  	or URLs in the text. Note that text/html may be included by
+  	adding --allow option.''')
+
+   parser.add_argument('--forward','-f',action='store_true', help=
+  	'''Operate in forward mode. Most email headers are stripped except
+  	for a subject line. Some headers (to,from) become part
+  	of the message body and may be reformated such that they cannot
+  	be used by an MTA. Because from/to are no longer included in headers,
+  	you must
+  	provide these when this message is passed to the MTA (sendmail).
+  	If this forward option is NOT included,
+  	the filter runs in relay/redirect mode in which case most or
+  	all of the headers are retained, including the subject, allowing
+  	the message to relayed by an MTA without providing additional information.''')
+
+   parser.add_argument('--unaddressed','-u',action='store_true', help=
+	'''Omit From/To from message header. The MTA must provide these.''')
+
+   parser.add_argument('--plain','-p',action='store_true', help=
+  	'''Only allow text/plain content through filter. Note that a
+	single-part message with no content type indicated is assumed to be
+	text/plain content for historic reasons. The default behaviour,
+	when not in safe mode it is allow text/*''')
+
+   parser.add_argument('--allow','-a',action='store_true', help=
+  	'''Allow text/html sections even in safe mode, however, resulting
+  	html, after obscure, may be inconsistent. Has no effect without
+  	--safe, implies --digits, not compatible with --plain''')
+
+   parser.add_argument('--digits','-d',action='store_true', help=
+  	'''Allow some digit characters through the text filter, as long
+  	as they don't look like a code. Has no effect without --safe''')
+
+   parser.add_argument('--otp','-o',action='store_true', help=
+   	'''Allow what might be an OTP or TOTP or HOTP consisting of a string
+   	of up to 10 digits through the filter.
+   	You might use this because you actually want to allow an OTP
+   	through the filter, but, more likely you will use this because you
+   	are not worried about OTPs in this instance and you want to avoid
+   	obscuring some dates and phone numbers and you want to allow more
+   	of the text/html to work. Has no effect without --safe.''')
+
+   parser.add_argument('--maxlen','-m',action='store',type=int, default=60000, help=
+   	'''Set a maximum length of the output message body.''')
+
+   cmdargs=parser.parse_args(args)
+
+   if cmdargs.allow:
+      if cmdargs.plain:
+         raise UserWarning("--allow not compatible with --plain")
+
+      cmdargs.digits=True
+
+   if cmdargs.safe:
+      # --safe implies --plain, unless --allow
+      if not cmdargs.allow:
+         cmdargs.plain=True
+
+   msg=email.message_from_file(sys.stdin)
+
+   # Account for length of subject line
+   if msg.has_key('subject'):
+      cmdargs.maxlen -= (len(msg['subject'])+10)
+
+   if msg.is_multipart():
+      return multipart(msg,cmdargs)
+
+   if cmdargs.forward:
+      forward_msg=msg
+   else:
+      forward_msg=None
+
+   contype=msg["Content-Type"]	# None if no content type
+   #contype=msg.get_content_type()  # might be better?
+   #print("contype:",contype,"maintype:",msg.get_content_maintype())
+
+   if contype == None:
+      # No content type on message. For historic reasons this is not
+      # an error. Older email systems and clients did not use content
+      # type. We will assume text/plain
+      payload=msg.get_payload(decode=True)
+      if isinstance(payload,str):
+         output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
+         print()
+         output_msgbody(payload,cmdargs,note='Unknown content type',
+         	forward_msg=forward_msg)
+         return main_rc_NOCONTENT
+      else:
+         raise UserWarning("No content type or message playload: "+str(type(payload)))
+
+   if not isinstance(contype,str):
+      raise UserWarning("Unknown content type: "+str(type(contype)))
+
+   #print("Content-Type:",type(contype))	#DEBUG
+   textcontent=False
+   pay1=None
+   if contype[:4] == 'text':
+      # We decode the payload in order to process it.
+      pay1=msg.get_payload(decode=True)
+      if contype[:10] == 'text/plain':
+         # This is what we like to see.....
+         output_msgbody(pay1,cmdargs,forward_msg)
+         return 0
+      else:
+         # Content is text, but not plain. Probably html.
+         if cmdargs.allow:
+            output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
+            # but now, we need to put back mime/content type
+            # that output_msgheader does not include.
+            print("Content-Type:",contype)
+            print()
+            # Not sure it is valid to include non-html stuff
+            # so I might have to remove forward_msg
+            # yahoo webmail seems to render it correctly.
+            output_msgbody(pay1,cmdargs,forward_msg=forward_msg)
+         else:
+            output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
+            print()
+            output_msgbody("none",cmdargs,note="no text/plain in message",
+            	forward_msg=forward_msg)
+
+         return main_rc_NOPLAIN
+
+   # This is not text
+   output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
+   print()
+   output_msgbody("none",cmdargs,note="no text in messsage",
+           forward_msg=forward_msg)
+
+   return main_rc_NOPLAIN
+
+   # END main
+
+if __name__ == "__main__":
+   sys.exit(main(sys.argv[1:]))
