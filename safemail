@@ -666,12 +666,12 @@ def output_msgheader(msg,foward_mode,unaddressed,file=sys.stdout):
       if k.upper()[:9]=="DOMAINKEY": continue
       if k.upper()[:4]=="DKIM": continue
       if k.upper()[:13]=="AUTHENICATION": continue
+      if k.upper() == "TO": continue
+      if k.upper() == "DELIVERED-TO": continue
       if unaddressed:
-         if k.upper() == "TO": continue
          if k.upper() == "FROM": continue
          if k.upper() == "RETURN-PATH": continue
          if k.upper() == "SENDER": continue
-         if k.upper() == "DELIVERED-TO": continue
 
       print("%s:" % (k),msg[k],file=file)
       
