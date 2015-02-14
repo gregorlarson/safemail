@@ -10,16 +10,25 @@ The good things about this approach are that the Provider is leverging the email
    - For example, if the Member purchases their email, then there is a billing relationship that the email Provider can use to assure identity.
    - If the email address is associated with the Members residential internet service, then there may also be local offices and support staff who can assure identity.
    - If the email address is provided incendental to employment or membership in another organization, then there are IT staff who will help assure the identity of the person with that address.
-### The Bad
+   - If the email address is associated with their Domain registrar or Hosting provider, there are other systems, billing arragements and staff who can assure identity, however, there are a number of risks here.
 
+### The Bad
+Many (if not most) users do not have a really close relationship with their personal email provider. End-users are enticed to choose free email providers that provide portability, high-availability, good user-experiece and very high storage limits. The big free providers in North America are Google, Microsoft, Apple and Yahoo. There are a number of smaller providers as well.
+### Authentication Chains
+
+#### Accessing and Forwarding Email
+Users will often want their email forwarded to an email facility and device that is convenient to them. This raises the primary security contradiction with email. The user wants fast easy access to their email, and, we actually want them to have the fast, easy access if we need them to be informed and take actions.
 ### The Ugly
 
 # Using Safemail
 This utility can be used with a local delivery agent (LDA) like postfix or procmail to process the contents of an email message in order to remove attachments, html sections and message text that presents a security risk.
 ## Obcuring Codes and URLs
-Safemil can obscure things like one-time-passwords (OTP), email verification links or account recovery and password reset links. What this means is that the email can then be forwarded to a less secure device or individual who may read the message but not be expected to handle all the security considerations associated with an email address. 
+Safemil can obscure things like one-time-passwords (OTP), email verification links or account recovery and password reset links. What this means is that the email can then be forwarded to a less secure device or individual who may read the message but not be expected to handle all the security considerations associated with an email address.
+## Retaining Useful Text in the Message
+## HTML E-Mail
+## Mutli-part (MIME) email
+## Encoded Email (Base32/Base64)
 ## Limiting Message Size and Content Type
-
 ## Message Header Manipulations
 ### Redirecting
 ### Redirecting with Addresses Removed
