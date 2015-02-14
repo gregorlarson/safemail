@@ -2,9 +2,16 @@
 Sanitize email contents for forwarding to less secure zone or SMS.
 # Background
 ## E-Mail as Identity and Authentication
-Many companies and organization use E-Mail as a proxy for identification. They use the email address to validate the identity of the Person, Company or Organization accessing their system. This relationship is usually established during the account signup. The user is required to enter a valid email address into a web form along with their other identity information, and a code or URL containing a code is sent to the email address. When the user follows the URL in the email or provides the code number back to a web-page this validates that the relationship between the account and that email address.
+Many companies and organization (Provider) use E-Mail as a proxy for identification. They use the email address to validate the identity of the Person, Company or Organization (Member) accessing their system. This relationship is usually established during the account signup. The Member is required to enter a valid email address into a web form along with their other identity information, and a code or URL containing a code is sent to the email address. When the Member follows the URL in the email or provides the code number back to a web-page, this validates that the relationship between the Provider account and that email address.
 
-Later, if there is an authenication problem with that account, because the password has been forgotten, or stolen, then the email address is used re-set the password and re-establish ownership of the account.
+Later, if there is an authenication problem with that account, because the password has been forgotten, or stolen, then the Member can use an account recovery process where their email address is used re-set the password and re-establish ownership of the account.This is done by the Provider sending an password reset URL or code to the validated email address where the Member can follow the URL or enter the code into a web-form in order to reset their password.
+### The Good
+The good things about this approach are that the Provider is leverging the email authentication and identity into their own system. The Member has strong incentives to retain control and privacy of their email account. The email provider may have a stronger relationship to the Member than the Provider, via another service, organization, employment or billing.
+   - For example, if the Member purchases their email, then there is a billing relationship that the email Provider can use to assure identity.
+   - If the email address is associated with the Members residential internet service, then there may also be local offices and support staff who can assure identity.
+   - If the email address is provided incendental to employment or membership in another organization, then there are IT staff who will help assure the identity of the person with that address.
+
+
 
 This utility can be used with a local delivery agent (LDA) like postfix or procmail to process the contents of an email message in order to remove attachments, html sections and message text that presents a security risk.
 
