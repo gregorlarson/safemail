@@ -1,9 +1,9 @@
 # safemail
 Sanitize email contents for forwarding to less secure zone or SMS.
 
-This utility can be used with a local delivery agent (LDA) like postfix or procmail to process the contents of an email message in order to remove attachments, html sections and message contents that present a security risk.
+This utility can be used with a local delivery agent (LDA) like postfix or procmail to process the contents of an email message in order to remove attachments, html sections and message text that presents a security risk.
 
-In particular, this utility can obscure things like one-time-passwords (OTP), email verification links or account recovery and password reset links. What this means is that the email can then be forwarded to a less secure device or individual who may not be expected to handle the security considerations associated with an email address. 
+In particular, this utility can obscure things like one-time-passwords (OTP), email verification links or account recovery and password reset links. What this means is that the email can then be forwarded to a less secure device or individual who may read the message but not be expected to handle all the security considerations associated with an email address. 
 
 The script uses standard input and output which can be piped to sendmail or another message transport agent (MTA). I use the postfix (sendmail) MTA.
 
@@ -14,10 +14,9 @@ Note that an email message with full headers is expected on standard input.
 
 ### Include only text/plain sections
 ```sh
-safemail -p | sendmail
+safemail -p | sendmail user@example.com
 ```
 ### Forward the email rather than redirect/relay.
-Ignore (remove) From/To from incoming email.
 ```sh
 safemail -f | sendmail user@example.com
 ```
@@ -31,8 +30,15 @@ Limit the content to text/plain and the size to 140 characters.
 ```sh
 safemail -fpm 140 | sendmail 6135555555@vmobile.ca
 ```
-
 ### Redirect the message in safe mode, but allow some HTML
 ```sh
-safemail -sa | sendmail
+safemail -sa | sendmail user@example.com
+```
+### Redirect the email but remove From address from header.
+```sh
+safemail -up | sendmail user@example.com
+```
+### Redirect the email in safe mode, but allow numbers and html
+```sh
+safemail -sao | sendmail user@example.com
 ```
