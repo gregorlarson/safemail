@@ -22,7 +22,16 @@ When an email account or phone number is closed, the owner may forget that these
 Users will often want their email forwarded to a facility and device that is convenient to them. This raises the primary security contradiction with email.
 The user wants fast easy access to their email, and, we actually want them to have the fast, easy access if we need them to be informed and take actions on that email.
 An email address which is only available at a secure terminal in the office quickly becomes less useful, and there is a cascading effect where the less often an email address is checked, the less important email is sent there.
+Because email must be very available to be useful, it is also more exposed to theft. A person who checks their email 20 times a day is unlikely to enter a long password each time.
 ### The Ugly
+You have strong system passwords, safely stored in a good password vault, that you never use on an insecure device, never cache in a browser. Perhaps you even use multi-factor authentication...
+You may still be exposed to the email based account-attack.
+
+Even if you have not changed your password in years, and have logged into a system reqularly and recently, you might be unpleasantly surprised at what happens when some attacker clicks the I-Forgot-My-Password link.
+
+Many providers will simply send the password-reset link to the email address they have on file for you. Sometimes they will ask a personal question, or email address before sending that link, but not always.
+
+# How Safemail may protect you
 
 # Using Safemail
 This utility can be used with a local delivery agent (LDA) like postfix or procmail to process the contents of an email message in order to remove attachments, html sections and message text that presents a security risk.
