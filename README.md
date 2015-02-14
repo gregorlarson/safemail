@@ -10,14 +10,17 @@ The good things about this approach are that the Provider is leverging the email
    - For example, if the Member purchases their email, then there is a billing relationship that the email Provider can use to assure identity.
    - If the email address is associated with the Members residential internet service, then there may also be local offices and support staff who can assure identity.
    - If the email address is provided incendental to employment or membership in another organization, then there are IT staff who will help assure the identity of the person with that address.
-   - If the email address is associated with their Domain registrar or Hosting provider, there are other systems, billing arragements and staff who can assure identity, however, there are a number of risks here.
+   - Some of the big free email providers (Google, Microsoft, Apple) now have very sophisticated account security proceedures using mutli-factor authentication and phone number OTP delivery.
+   - If the email address is associated with their Domain registrar or Hosting provider, there are other systems, billing arragements and staff who can assure identity, however, there is more risk of a circular authentication dependancy here (see below).
 
 ### The Bad
-Many (if not most) users do not have a really close relationship with their personal email provider. End-users are enticed to choose free email providers that provide portability, high-availability, good user-experiece and very high storage limits. The big free providers in North America are Google, Microsoft, Apple and Yahoo. There are a number of smaller providers as well.
-### Authentication Chains
-
+Many (if not most) users do not have a really close relationship with their personal email provider. End-users are enticed to choose free email providers that provide portability, high-availability, good user-experiece and very high storage limits. The big free providers in North America are Google, Microsoft, Apple and Yahoo. There are a number of smaller providers as well.  Because these email accounts are free, there may be no billing information that can be used to support identity.  Also, users are moving away from the ISP or employer provided email and using the free email as their primary personal email address. In many cases there may no good backup email address that can be used to recover their primary email address.
+#### Broken Authentication Chains
+Users may abandon an email address or phone number, sometimes without considering all the consequences. A free email account may be closed simply because the user no longer logs into it regularly. 
+When an email account or phone number is closed, the owner may forget that these addresses have the seconary use as an identity provider.
 #### Accessing and Forwarding Email
-Users will often want their email forwarded to an email facility and device that is convenient to them. This raises the primary security contradiction with email. The user wants fast easy access to their email, and, we actually want them to have the fast, easy access if we need them to be informed and take actions.
+Users will often want their email forwarded to an email facility and device that is convenient to them. This raises the primary security contradiction with email.
+The user wants fast easy access to their email, and, we actually want them to have the fast, easy access if we need them to be informed and take actions on that email.
 ### The Ugly
 
 # Using Safemail
