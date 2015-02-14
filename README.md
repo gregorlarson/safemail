@@ -19,8 +19,9 @@ Many (if not most) users do not have a really close relationship with their pers
 Users may abandon an email address or phone number, sometimes without considering all the consequences. A free email account may be closed simply because the user no longer logs into it regularly. 
 When an email account or phone number is closed, the owner may forget that these addresses have the seconary use as an identity provider.
 #### Accessing and Forwarding Email
-Users will often want their email forwarded to an email facility and device that is convenient to them. This raises the primary security contradiction with email.
+Users will often want their email forwarded to a facility and device that is convenient to them. This raises the primary security contradiction with email.
 The user wants fast easy access to their email, and, we actually want them to have the fast, easy access if we need them to be informed and take actions on that email.
+An email address which is only available at a secure terminal in the office quickly becomes less useful, and there is a cascading effect where the less often an email address is checked, the less important email is sent there.
 ### The Ugly
 
 # Using Safemail
