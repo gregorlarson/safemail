@@ -10,12 +10,22 @@ The good things about this approach are that the Provider is leverging the email
    - For example, if the Member purchases their email, then there is a billing relationship that the email Provider can use to assure identity.
    - If the email address is associated with the Members residential internet service, then there may also be local offices and support staff who can assure identity.
    - If the email address is provided incendental to employment or membership in another organization, then there are IT staff who will help assure the identity of the person with that address.
+### The Bad
 
+### The Ugly
 
-
+# Using Safemail
 This utility can be used with a local delivery agent (LDA) like postfix or procmail to process the contents of an email message in order to remove attachments, html sections and message text that presents a security risk.
+## Obcuring Codes and URLs
+Safemil can obscure things like one-time-passwords (OTP), email verification links or account recovery and password reset links. What this means is that the email can then be forwarded to a less secure device or individual who may read the message but not be expected to handle all the security considerations associated with an email address. 
+## Limiting Message Size and Content Type
 
-In particular, this utility can obscure things like one-time-passwords (OTP), email verification links or account recovery and password reset links. What this means is that the email can then be forwarded to a less secure device or individual who may read the message but not be expected to handle all the security considerations associated with an email address. 
+## Message Header Manipulations
+### Redirecting
+### Redirecting with Addresses Removed
+### Forwarding
+
+# Scripting and Installation
 
 The script uses standard input and output which can be piped to sendmail or another message transport agent (MTA). I use the postfix (sendmail) MTA.
 
