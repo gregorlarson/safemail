@@ -14,26 +14,28 @@ The good things about this approach are that the Provider is leverging the email
    - If the email address is associated with their Domain registrar or Hosting provider, there are other systems, billing arragements and staff who can assure identity, however, there is more risk of a circular authentication dependancy here (see below).
 
 ### The Bad
-By using email as an authen
+Using email as a secondary authentication mechanism is really using email for something it was not designed for. It is *overloading* communication and authentication. In fact, using email addresses in this way is creating a security contradiction where we want email to be easy to access, and things like password-resets to be very difficult to access. Because the same email address will be used for communication and authentication, you can't simply lock-down the email address and only check it once or twice a year (or when you need a security override). In an organization, there may be more than one individual who should recieve emails from an important service provider.
+
 Many (if not most) users do not have a really close relationship with their personal email provider. End-users are enticed to choose free email providers that provide portability, high-availability, good user-experiece and very high storage limits. The big free providers in North America are Google, Microsoft, Apple and Yahoo. There are a number of smaller providers as well.  Because these email accounts are free, there may be no billing information that can be used to support identity.  Also, users are moving away from the ISP or employer provided email and using the free email as their primary personal email address. In many cases there may no good backup email address that can be used to recover their primary email address.
 #### Broken Authentication Chains
 Users may abandon an email address or phone number, sometimes without considering all the consequences. A free email account may be closed simply because the user no longer logs into it regularly. 
 When an email account or phone number is closed, the owner may forget that these addresses have the seconary use as an identity provider.
 #### Accessing and Forwarding Email
 Users will often want their email forwarded to a facility and device that is convenient to them. This raises the primary security contradiction with email.
-The user wants fast easy access to their email, and, we actually want them to have the fast, easy access in order that they may be informed and take actions based on that email.
+> The user wants fast easy access to their email, and, we actually want them to have the fast, easy access in order that they may be informed and take actions based on that email.
 An email address which is only available at a secure terminal in the office quickly becomes less useful, and there is a cascading effect where the less often an email address is checked, the less important email is sent there.
-Because email must be very available to be useful, it is also more exposed to theft. A person who checks their email 20 times a day is unlikely to enter a long password each time.
+Because email must be very available to be useful, it is also more exposed to theft.
 
-For these reasons, an email access theft is often the first step in a ugly security breach. A device with access to the email is misplaced or stolen. A user forgets to log out or lock their terminal.  Often there is a social component where the executive who is 
+A person who checks their email 20 times a day is unlikely to enter a long password each time.
+
+For these reasons, an email access theft is often the first step in a ugly security breach. A device with access to the email is misplaced or stolen. A user forgets to log out or lock their terminal.  Often there is a social component where the executive who is the one who will act on an email message is not trained or thinking about system security.
 ### The Ugly
 You have strong system passwords, safely stored in a good password vault, that you never use on an insecure device, never cache in a browser. Perhaps you even use multi-factor authentication...
 You may still be exposed to the email based account-attack.
 
-Even if you have not changed your password in years, and have logged into a system reqularly and recently, you might be unpleasantly surprised at what happens when some attacker clicks the I-Forgot-My-Password link.
+> Even if you have not changed your password in years, and have logged into a system reqularly and recently, you might be unpleasantly surprised at what happens when some attacker clicks the I-Forgot-My-Password link.
 
-Many providers will simply send the password-reset link to the email address they have on file for you. Sometimes they will ask a personal question, but not always. Sometimes they will ask for the email address associated with the account, which is not an effective sercurity measure. The attacker often already has access to an email account and it trying to use that email account to increase their level of access.
-
+Many providers will simply send the password-reset link to the email address they have on file for you. Sometimes they will ask a personal question, but not always. Sometimes they will ask for the email address associated with the account, which is not an effective sercurity measure. The attacker often already has access to an email account and it trying to use that email account to increase their level of control and access.
 # How Safemail may protect you
 
 # Using Safemail
