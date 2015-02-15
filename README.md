@@ -37,7 +37,9 @@ You may still be exposed to the email based account-attack.
 
 Many providers will simply send the password-reset link to the email address they have on file for you. Sometimes they will ask a personal question, but not always. Sometimes they will ask for the email address associated with the account, which is not an effective sercurity measure. The attacker often already has access to an email account and it trying to use that email account to increase their level of control and access.
 # How Safemail may protect you
+Safemail allows you to *lock-down* an important email address and then forward santizied messages to less secure zones. In this way, the people who need to see the email can read it on whatever device they choose, but the forwarded emails do not have sufficient information for someone to assume ownership of the account.
 
+If someone attempts a password reset using the email address, the forwarded version will contain the URL obscured such that is is not usable.
 # Using Safemail
 This utility can be used with a local delivery agent (LDA) like postfix or procmail to process the contents of an email message in order to remove attachments, html sections and message text that presents a security risk.
 ## Obcuring Codes and URLs
