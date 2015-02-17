@@ -1,9 +1,26 @@
 # safemail
 Sanitize email contents for forwarding to less secure zone or SMS.
+# Background
+Refer to [Mail Identity](MAILIDENT.md) discussion (rant).
+# How Safemail Can Protect your Account from an Email Takeover
+Safemail allows you to *lock-down* an important email address and then forward santizied messages to less secure zones. In this way, the people who need to see the email can read it on whatever device they choose, but the forwarded emails do not have sufficient information for someone to assume ownership of the account.
 
+If someone attempts a password reset using the email address, the forwarded version will contain the URL obscured such that is is not usable.
+# Using Safemail
 This utility can be used with a local delivery agent (LDA) like postfix or procmail to process the contents of an email message in order to remove attachments, html sections and message text that presents a security risk.
+## Obcuring Codes and URLs
+Safemil can obscure things like one-time-passwords (OTP), email verification links or account recovery and password reset links. What this means is that the email can then be forwarded to a less secure device or individual who may read the message but not be expected to handle all the security considerations associated with an email address.
+## Retaining Useful Text in the Message
+## HTML E-Mail
+## Mutli-part (MIME) email
+## Encoded Email (Base32/Base64)
+## Limiting Message Size and Content Type
+## Message Header Manipulations
+### Redirecting
+### Redirecting with Addresses Removed
+### Forwarding
 
-In particular, this utility can obscure things like one-time-passwords (OTP), email verification links or account recovery and password reset links. What this means is that the email can then be forwarded to a less secure device or individual who may read the message but not be expected to handle all the security considerations associated with an email address. 
+# Scripting and Installation
 
 The script uses standard input and output which can be piped to sendmail or another message transport agent (MTA). I use the postfix (sendmail) MTA.
 
