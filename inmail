@@ -1,0 +1,105 @@
+#!/bin/sh
+#
+# Example script to be called by Local Delivery Agent (LDA).
+# This could be called from ~/.forward for example:
+#
+#	"|$HOME/bin/inmail yourname@example.com"
+#
+# New mail message is on stdin.
+# Exit 75 will leave mail queued (for some time).
+#
+# Mail is delivered to ~/inmail/Inbox
+# 	- ~/inmail can be a symlink to where you would like.
+#
+# A sanitized copy of email is forwarded.
+#
+
+# Log output for debugging. Note that this log file may need to
+# be rotated or deleted periodically.
+#
+log=$HOME/tmp/inmail.log
+[ -f "$log" ] || touch "$log"
+
+# If this script is called by LDA, stderr is probably /dev/null
+[ -w "$log" ] && exec >> "$log" 2>&1
+# stdout, stderr may now be redirected to append to log file.
+
+log() {
+  if [ -w "$log" ]; then
+     d=`date '+%y-%m-%d-%H:%M:%S'`
+     echo "$d $*"
+  else
+     # if no log file, then use syslog
+     logger -t mail "inmail: $*"
+  fi
+}
+
+fail75() {
+  log "$@"
+  exit 75
+}
+
+# Select a temporary directory for incoming
+TMPDIR=
+for t in "/run/shm/$LOGUSER" "/dev/shm/$LOGUSER" "$HOME/inmail" "$HOME/tmp" ; do
+   if [ -d "$t" -a -w "$t" ]; then
+      TMPDIR="$t"
+      break
+   fi
+done
+[ "$TMPDIR" ] || fail75 "No temporary directory."
+
+tmpfile=$TMPDIR/mail$$
+# Copy mail from LDA to temporary file.
+cat > "$tmpfile"
+[ -f "$tmpfile" ] || fail75 "Could not create $tmpfile"
+chmod 600 "$tmpfile"
+
+# Keep a copy of original version in Inbox
+# deliverf is a python script that delivers stdin with locking.
+# It will exit 75 if delivery fails for any reason.
+#
+# see https://github.com/gregorlarson/deliverf
+#
+deliverf -n $HOME/inmail/Inbox < "$tmpfile"
+deliverf_rc=$?
+
+if [ $deliverf_rc -ne 0 ]; then
+   log "deliverf failed. Forward anyways."
+   # Because we forward, even if deliverf fails, the LDA may re-attempt delivery later,
+   # resulting in multiple copies of the email being forwarded.
+fi
+
+sendmail=/usr/sbin/sendmail
+
+# Figure out where we are forwarding email, based on FORWARD_EMAIL
+# command-line or a file ~/.forward.email
+forward=${FORWARD_EMAIL:-$1}
+if [ -z "$forward" ]; then
+   fe=$HOME/.forward.email
+   [ -f $fe ] && read forward < $fe
+fi
+
+if [ "$forward" ]; then
+   # Sanitized the forwarded email, allow some html, but removing
+   # most emailed codes, coded URLs, verification links, OTP etc.
+
+   # TODO: put safemail on standard path
+   # safemail is a python script that processes an email
+   # on stdin and removes or obscures some items in order
+   # to prevent abuse.
+   #
+   # see:  https://github.com/gregorlarson/safemail
+   #
+   $HOME/bin/safemail -fsa < "$tmpfile" | $sendmail "$forward"
+   sendmail_rc=$?
+   if [ $sendmail_rc -ne 0 ]; then
+      log "sendmail '$forward' rc=$sendmail_rc"
+   fi
+fi
+
+# cleanup
+rm "$tmpfile"
+
+# Provide the exit code from deliverf back to LDA.
+exit $deliverf_rc
