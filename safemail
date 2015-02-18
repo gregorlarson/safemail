@@ -99,7 +99,7 @@ class MsgBodyFilter:
       self.set_note(note)
 
    def out_of_room(self):
-      return self.remaining < (self.note_len+20):
+      return self.remaining < (self.note_len+20)
 
    def set_note(self,note):
       '''Suffix note for end of message, if space permits.
@@ -156,7 +156,7 @@ class MsgBodyFilter:
 
       # END add_forward
 
-   def add_body(payload,comment=None):
+   def add_body(self,payload,comment=None):
       '''Add to outgoing message body given a string payload and optional
       comment for end of section. Leading and trailing blank lines are removed.
       Trailing white-space is removed.'''
@@ -224,7 +224,7 @@ class MsgBodyFilter:
       w=bytearray()
       # TODO: move to self.trailing_junk or make global
       trailing_junk=bytearray('\n\r\t ')
-      for line in inf:
+      for line in instream:
          # line is always str, but we put in bytearry for faster manipulation.
          w[0:]=line
          # remove trailing junk from line
@@ -896,7 +896,7 @@ def hidecodes(txt):
 
    return txt
 
-def output_msgheader(msg,foward_mode,unaddressed,file=sys.stdout):
+def output_msgheader(msg,forward_mode,unaddressed,file=sys.stdout):
    '''Output the email header, given an existing message.
    This is really only going to handle a single-part message with
    a content type of text/plain; ... For more sophisticated messages
@@ -909,8 +909,8 @@ def output_msgheader(msg,foward_mode,unaddressed,file=sys.stdout):
    without additional information, assuming the original message
    was valid. Note that the CALLER must output a blank line after
    the message header, prior to the body of the message.'''
-   if foward_mode:
-      print("Subject:",msg['subject'],file=file) # should be in header
+   if forward_mode:
+      print("Subject:",msg['subject'],file=file)
       return
 
    for k in msg.keys():
@@ -931,124 +931,7 @@ def output_msgheader(msg,foward_mode,unaddressed,file=sys.stdout):
 
       print("%s:" % (k),msg[k],file=file)
 
-def output_msgbody(payload,opt,note=None,forward_msg=None,file=sys.stdout):
-   '''Output a message body given a string payload.
-   The command opt, from argparse, or just any Namespace with fields:
-   safe - obscure codes, digits - allow digits, otp - allow otp.
-   Optionally add additional fields from provided forward_msg into the
-   message body. Note that caller must handle the message header and
-   output the blank line after the message header because this code
-   will suppress leading and trailing blank lines.
-   Trailing white-space and repeated blank lines are deleted.
-   payload may be str or bytearry, it is not changed.'''
-
-   if forward_msg:
-      # In forward mode, some fields from the source message
-      # are included in the new message body.
-      # print(forward_msg.keys())
-      if opt.maxlen > 120:
-         extra="From: "+forward_msg['from']
-         elen=len(extra)+1
-         print(extra,file=file)
-         opt.maxlen -= elen
-
-         if opt.maxlen > 200:
-            extra="To: "+forward_msg['to']
-            elen=len(extra)+1
-            print(extra,file=file)
-            opt.maxlen -= elen
-
-            if opt.maxlen > 360:
-               extra="Date: "+forward_msg['date']
-               elen=len(extra)+1
-               print(extra,file=file)
-               opt.maxlen -= elen
-
-         print(file=file)
-
-   # Could we not simply do payload.split('\n')? Would that be more
-   # efficient? Split is not
-   # a generator, however, there are some generator implementation of
-   # str.split that might be applied....
-   # http://stackoverflow.com/questions/3862010/is-there-a-generator-version-of-string-split-in-python/12764478#12764478
-   # It would be interesting to try a generator that yields bytearray rather
-   # than string.
-   # Mind you, cStringIO is likely pretty good, and I believe it is a generator.
-   inf=cStringIO.StringIO(payload)
-
-   leadin=True
-   blank=0
-
-   include_note=False
-   if note:
-      # A note was provided
-      elen=len(note) + 14
-      if opt.maxlen > 300:
-         # For longer max len, include note even if it truncates payload.
-         opt.maxlen -= elen
-         include_note=True
-      elif len(payload)+elen < opt.maxlen:
-         # For short max len, include note only if there is space.
-         include_note=True
-         opt.maxlen -= elen
-
-   trunc_note=None
-   truncated=False
-   if opt.maxlen > 270:
-      # longer messages get a truncated indication at the end.
-      if len(payload) > opt.maxlen:
-         # add a truncated message to longer messages
-         trunc_note='.truncated'
-         opt.maxlen -= 11
-
-   w=bytearray()
-   trailing_junk=bytearray('\n\r\t ')
-   for line in inf:
-      if opt.maxlen < 3:
-         truncated=True
-         break
-
-      # line is always str, but we put in bytearry for faster manipulation.
-      w[0:]=line
-      # remove trailing junk from line
-      while w and w[-1] in trailing_junk:	# assumes short-circut eval
-         del w[-1]
-
-      if not w:
-         if leadin:
-            continue		# suppress leading blank lines
-         blank += 1		# count blank line
-         continue
-
-      leadin=False
-      if blank > 0:
-         # collapse multiple blank lines to a single blank line.
-         print(file=file)
-         opt.maxlen -= 1
-         blank=0
-
-      if opt.safe:
-         if opt.digits or opt.otp:
-            if not is_safe(w,opt.otp,opt.allow):
-               hidecodes(w)	# hidecodes modifies w bytearray
-         else:
-            hidecodes(w)	# hidecodes modifies w bytearray
-
-      d=opt.maxlen - len(w)
-      if d < 0:
-         # Current line won't fit.
-         del w[d:]
-         truncated=True
-
-      print(w,file=file)
-      opt.maxlen -= (len(w)+1)
-
-   if truncated and trunc_note:
-      print(trunc_note,file=file)
-
-   if include_note:
-      print("-safemail---",note,file=file)
-      # length account for earlier
+   # END output_msgheader
 
 def scantext(msg):
    '''Extract the text/* parts of a multi-part message.
@@ -1217,6 +1100,10 @@ def main(args):
    #contype=msg.get_content_type()  # might be better?
    #print("contype:",contype,"maintype:",msg.get_content_maintype())
 
+   # (safe,maxlen,allow_digits,allow_html,allow_otp,outstream,note)
+   mb=MsgBodyFilter(cmdargs.safe,cmdargs.maxlen,cmdargs.digits,cmdargs.allow,
+                    cmdargs.otp,sys.stdout)
+
    if contype == None:
       # No content type on message. For historic reasons this is not
       # an error. Older email systems and clients did not use content
@@ -1226,9 +1113,7 @@ def main(args):
          output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
          print()
 
-         # (safe,maxlen,allow_digits,allow_html,allow_otp,outstream,note)
-         mb=MsgBodyFilter(cmdargs.safe,cmdargs.maxlen,cmdargs.digits,cmdargs.allow,
-                          cmdargs.otp,file, note='Unknown content type')
+         mb.set_note('Unknown content type')
          if cmdargs.forward:
             mb.add_forward(msg)
 
@@ -1248,9 +1133,6 @@ def main(args):
    if contype[:4] == 'text':
       # We decode the payload in order to process it.
       pay1=msg.get_payload(decode=True)
-      # (safe,maxlen,allow_digits,allow_html,allow_otp,outstream,note)
-      mb=MsgBodyFilter(cmdargs.safe,cmdargs.maxlen,cmdargs.digits,cmdargs.allow,
-                       cmdargs.otp,file, note='Unknown content type')
       if contype[:10] == 'text/plain':
          # This is what we like to see.....
          output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
@@ -1270,23 +1152,29 @@ def main(args):
             print("Content-Type:",contype)
             print()
             # Not sure it is valid to include non-html stuff
-            # so I might have to remove forward_msg
+            # so I might have to remove the forward stuff.
             # yahoo webmail seems to render it correctly.
-            output_msgbody(pay1,cmdargs,forward_msg=forward_msg)
+            if cmdargs.forward:
+               mb.add_forward(msg)
+            mb.add_body(pay1)
          else:
             output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
             print()
-            output_msgbody("none",cmdargs,note="no text/plain in message",
-            	forward_msg=forward_msg)
+            mb.set_note("no text/plain in message")
+            if cmdargs.forward:
+               mb.add_forward(msg)
+            mb.add_body("none")
 
+         mb.close()
          return main_rc_NOPLAIN
 
    # This is not text
    output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
    print()
-   output_msgbody("none",cmdargs,note="no text in messsage",
-           forward_msg=forward_msg)
-
+   mb.set_note("no text in messsage")
+   if cmdargs.forward: mb.add_forward(msg)
+   mb.add_body("none")
+   mb.close()
    return main_rc_NOPLAIN
 
    # END main
