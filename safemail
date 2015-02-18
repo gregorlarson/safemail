@@ -30,12 +30,245 @@ import os,sys,random,cStringIO,email
 
 re_setup_done=False
 def setup_re():
-   '''Setup module global regular expressions.'''
+   '''Compile module global regular expressions.'''
    if re_setup_done: return
 
-   # Any string of more than 4 consecutive digits will be considered a code.
-   # Any url could be a code, however, if the URL does not contain a lot of
-   # material after the domain/ then it might be safe.
+stderr=sys.stderr		# module global stderr
+debug_level=None		# module global debug_level
+
+def diagout(*s,**k):
+ '''Diagnostic output messages go to stderr by default but
+    may be redirected globally, or using parameter.'''
+ out="".join([x.__str__() for x in s])
+
+ file=k.get('file')
+ if not file: file=stderr	# default to global stderr
+
+ print(out,file=file)
+ e=k.get('exception')
+ if e: print("   Exception:",e,file=file)
+ f=k.get('fatal')
+ if f:
+    # if debug, print a traceback?
+    sys.exit(7)
+
+class sm_exception(Exception):
+   '''Top level exception for this script. Optional second arg should
+      be underlying exception, if any.'''
+
+   def report(self,note=''):
+      '''Report the exception to operator, with optional note appended.'''
+
+      if debug_level:
+         exc_type, exc_value, exc_traceback = sys.exc_info()
+         # debug output always goes to sys.stderr
+         traceback.print_tb(exc_traceback, limit=3, file=sys.stderr)
+
+      if len(self.args) > 1:
+         if self.args[1]:
+            note=note+"\n   exception:"+self.args[1].__str__()
+
+      t=self._report()
+      if note:
+         if len(t) + len(note) > 78:
+            diagout(t,'\n',note)
+         else:
+            diagout(t+' '+note)
+      else:
+         diagout(t)
+
+   def _report(self):
+      'should be overridden in subclasses'
+      return 'safemail failure '+self.args[0]
+
+class UsageError(sm_exception):
+   '''Command was used incorrectly.'''
+   def _report(self):
+      return "safemail usage error:\n   "+self.args[0]
+
+class MsgBodyFilter:
+   '''A message body filter.'''
+   def __init__(self,safe,maxlen,allow_digits,allow_html,allow_otp,outstream,note=None):
+      self.safe=safe
+      self.maxlen=maxlen
+      self.remaining=maxlen
+      self.allow_digits=allow_digits
+      self.allow_html=allow_html
+      self.allow_opt=allow_otp
+      self.outstream=outstream
+      self.set_note(note)
+
+   def out_of_room(self):
+      return self.remaining < (self.note_len+20):
+
+   def set_note(self,note):
+      '''Suffix note for end of message, if space permits.
+      If multiple notes are provided, this will break. Some re-work
+      would be required to add or change notes.'''
+
+      self.note=note
+      if note:
+         # Note is printed with a prefix.
+         # Assuming note is final line in message body, we don't need to
+         # count newline.
+         self.note_len=len(note)+14
+      else:
+         self.note_len=0
+         return
+
+      # The note may not actually be included for short messages
+
+      if self.maxlen > 300:
+         # For longer max len, reserve space for the note.
+         self.remaining -= self.note_len
+      else:
+         # For short messages, note may be included if there is
+         # sufficient space.
+         self.note_len=0
+
+   def add_forward(self,msg):
+      '''Add some fields from original message header to the message body.'''
+      # In forward mode, some fields from the source message
+      # are included in the new message body.
+      # No hiding is done on these fields.
+      # The amount of detail included depends on the space remaining
+      # in the message.
+      # print(msg.keys())	#DEBUG
+      if self.remaining > 120:
+         extra="From: "+msg['from']
+         elen=len(extra)+1
+         print(extra,file=self.outstream)
+         self.remaining -= elen
+
+         if self.remaining > 200:
+            extra="To: "+msg['to']
+            elen=len(extra)+1
+            print(extra,file=self.outstream)
+            self.remaining -= elen
+
+            if self.remaining > 360:
+               extra="Date: "+msg['date']
+               elen=len(extra)+1
+               print(extra,file=self.outstream)
+               self.remaining -= elen
+
+         print(file=self.outstream)
+
+      # END add_forward
+
+   def add_body(payload,comment=None):
+      '''Add to outgoing message body given a string payload and optional
+      comment for end of section. Leading and trailing blank lines are removed.
+      Trailing white-space is removed.'''
+
+      # Could we not simply do payload.split('\n')? Would that be more
+      # efficient? Split is not
+      # a generator, however, there are some generator implementation of
+      # str.split that might be applied....
+      # http://stackoverflow.com/questions/3862010/is-there-a-generator-version-of-string-split-in-python/12764478#12764478
+      # It would be interesting to try a generator that yields bytearray rather
+      # than string.
+      # Mind you, cStringIO is likely pretty good, and I believe it is a generator.
+      inf=cStringIO.StringIO(payload)
+
+      # TODO: figure out if comment will fit and if it should be included.
+      #include_note=False
+      #if self.note_len > 0:
+      #   # A note was provided
+      #   elen=note_len
+      #   if self.maxlen > 300:
+      #      # For longer max len, include note even if it truncates payload.
+      #      self.remaining -= elen
+      #      include_note=True
+      #   elif len(payload)+elen < x.maxlen:
+      #      # For short max len, include note only if there is space.
+      #      include_note=True
+      #      self.remaining -= elen
+
+      trunc_note=None
+      if self.maxlen > 300:
+         # longer messages get a truncated indication at the end.
+         if len(payload) > self.remaining:
+            # add a truncated message to longer messages
+            trunc_note='.truncated'
+            # reserve space in message for .truncated note
+            self.remaining -= 11
+
+      truncated = self.pipe_body(inf)
+
+      if truncated and trunc_note:
+         print(trunc_note,file=self.outstream)
+
+      # END add_body
+
+   def close(self):
+      '''Complete output.'''
+
+      if self.note_len > 0:
+         print("-safemail---",self.note,file=self.outstream)
+         # length account for earlier
+         self.note_len=0
+
+   def pipe_body(self,instream):
+      '''Pipe data into body, update self.remaining.
+      Returns False if all input data was handled.
+      Returns True if input data was truncated.
+      Leading and trailing blank lines are stripped.
+      Trailing white space is stripped.
+      Output may be sanitized, based on initial flags.'''
+
+      leadin=True
+      blank=0
+      truncated=False
+
+      w=bytearray()
+      # TODO: move to self.trailing_junk or make global
+      trailing_junk=bytearray('\n\r\t ')
+      for line in inf:
+         # line is always str, but we put in bytearry for faster manipulation.
+         w[0:]=line
+         # remove trailing junk from line
+         while w and w[-1] in trailing_junk:	# assumes short-circut eval
+            del w[-1]
+
+         if not w:
+            # blank line
+            if leadin:
+               continue		# suppress leading blank lines
+            blank += 1		# count blank line
+            continue
+
+         leadin=False		# past initial blank lines
+         if blank > 0:
+            # collapse multiple blank lines to a single blank line.
+            print(file=self.outstream)
+            self.remaining -= 1
+            blank=0
+
+         if self.remaining < 3:
+            truncated=True
+            break
+
+         if self.safe:
+            # Safe mode
+            if self.allow_digits or self.allow_otp:
+               if not is_safe(w,self.allow_otp,self.allow_http):
+                  hidecodes(w)	# hidecodes modifies w bytearray
+            else:
+               hidecodes(w)	# hidecodes modifies w bytearray
+
+         d=self.remaining - len(w)
+         if d < 0:
+            # Current line won't fit.
+            del w[d:]
+            truncated=True
+
+         print(w,file=self.outstream)
+         self.remaining -= (len(w)+1)
+         if truncated: break
+
+      return truncated
+      # END pipe_body
 
 #
 # The following several functions deal with trying to figure out
@@ -114,8 +347,8 @@ def lens(txt):
    return (digits,lower,upper,punc,colon,late_upper,middle_digits)
 
 def is_code_log(word):
-  if len(word.strip()) == 0: raise UserWarning
-  if word[:4] == '&gt;': raise UserWarning(word)
+  if len(word.strip()) == 0: raise UserWarning		#DEBUG
+  if word[:4] == '&gt;': raise UserWarning(word)	#DEBUG
 
 def is_code_trace(word,digits,rc):
   '''TODO: use this to create a tool that allows me to inspect
@@ -198,14 +431,14 @@ def strip_cents(word):
 
    if len(word) < 3:			return False
    if word[-3] != ord('.'):		return False
-    
+
    if len(word) > 3:
       # check digits before dot
       if not word[:-3].isdigit():	return False
 
    # check digits after dot
    if not word[-2:].isdigit():		return False
-   
+
    del word[-3:]	# delete the dot cents
    return True		# return True to indicate modification
 
@@ -394,7 +627,7 @@ def is_code(word,codemin=4,longmin=5,allow_html=False):
             if is_code(hyph2[0],codemin=codemin-1) == 0:
                if is_code(hyph2[1],codemin=codemin-1) == 0:
                   return 0   # let simple 2-part @ email with almost no digits go
-      
+
       # Few digits
       # In many ways, we should tree this like zero digits.
 
@@ -423,7 +656,7 @@ def is_code(word,codemin=4,longmin=5,allow_html=False):
             return is_code_SHORTCODE
 
          return 0
-            
+
       if wl < 10:
          # 5-9 chars, may include some digits.
 
@@ -538,7 +771,7 @@ def is_code(word,codemin=4,longmin=5,allow_html=False):
       if punc>0 and punc<3 and lateup==0 and wl<18 and (upper==0 or lower==0):
          is_code_wonder(word)
          return 0	# let it go, could just be a domain or hyphenated
-         
+
       # Here I could allow for a non-complex URL or email address
       if digits == 0: is_code_log(word)
       return is_code_LONGCODE
@@ -697,7 +930,7 @@ def output_msgheader(msg,foward_mode,unaddressed,file=sys.stdout):
          if k.upper() == "SENDER": continue
 
       print("%s:" % (k),msg[k],file=file)
-      
+
 def output_msgbody(payload,opt,note=None,forward_msg=None,file=sys.stdout):
    '''Output a message body given a string payload.
    The command opt, from argparse, or just any Namespace with fields:
@@ -705,7 +938,7 @@ def output_msgbody(payload,opt,note=None,forward_msg=None,file=sys.stdout):
    Optionally add additional fields from provided forward_msg into the
    message body. Note that caller must handle the message header and
    output the blank line after the message header because this code
-   will suppress leading and trailing blank lines. 
+   will suppress leading and trailing blank lines.
    Trailing white-space and repeated blank lines are deleted.
    payload may be str or bytearry, it is not changed.'''
 
@@ -724,13 +957,13 @@ def output_msgbody(payload,opt,note=None,forward_msg=None,file=sys.stdout):
             elen=len(extra)+1
             print(extra,file=file)
             opt.maxlen -= elen
-         
+
             if opt.maxlen > 360:
                extra="Date: "+forward_msg['date']
                elen=len(extra)+1
                print(extra,file=file)
                opt.maxlen -= elen
-         
+
          print(file=file)
 
    # Could we not simply do payload.split('\n')? Would that be more
@@ -742,7 +975,7 @@ def output_msgbody(payload,opt,note=None,forward_msg=None,file=sys.stdout):
    # than string.
    # Mind you, cStringIO is likely pretty good, and I believe it is a generator.
    inf=cStringIO.StringIO(payload)
-  
+
    leadin=True
    blank=0
 
@@ -839,11 +1072,6 @@ def multipart(msg,opt,file=sys.stdout):
    can be any Namespace or object which has the fields we want:
    safe, forward, plain, allow, digits, otp'''
 
-   if opt.forward:
-      forward_msg=msg
-   else:
-      forward_msg=None
-
    (plain,other,total) = scantext(msg)
 
    # TODO: handle opt.allow (allow other text/)
@@ -876,11 +1104,23 @@ def multipart(msg,opt,file=sys.stdout):
                break
             remaining -= 1
             payload += "\n---\n" + part.get_payload(decode=True)
- 
+
    output_msgheader(msg,opt.forward,opt.unaddressed,file=file)
    print(file=file)
-   output_msgbody(payload,opt,note=note,forward_msg=forward_msg,file=file)
+
+   # TODO: rework to output_msgheader, create MsgBodyFilter, then iterate
+   #	through each plaintext portion
+
+   # (safe,maxlen,allow_digits,allow_html,allow_otp,outstream,note)
+   mb=MsgBodyFilter(opt.safe,opt.maxlen,opt.digits,opt.allow,opt.otp,file,note=note)
+   if opt.forward:
+      mb.add_forward(msg)
+
+   mb.add_body(payload)
+   mb.close()
    return rc
+
+   # END multipart
 
 # rc from main will be command exit code
 # 0 - normal
@@ -955,7 +1195,7 @@ def main(args):
 
    if cmdargs.allow:
       if cmdargs.plain:
-         raise UserWarning("--allow not compatible with --plain")
+         raise UsageError("--allow not compatible with --plain")
 
       cmdargs.digits=True
 
@@ -973,11 +1213,6 @@ def main(args):
    if msg.is_multipart():
       return multipart(msg,cmdargs)
 
-   if cmdargs.forward:
-      forward_msg=msg
-   else:
-      forward_msg=None
-
    contype=msg["Content-Type"]	# None if no content type
    #contype=msg.get_content_type()  # might be better?
    #print("contype:",contype,"maintype:",msg.get_content_maintype())
@@ -990,14 +1225,22 @@ def main(args):
       if isinstance(payload,str):
          output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
          print()
-         output_msgbody(payload,cmdargs,note='Unknown content type',
-         	forward_msg=forward_msg)
+
+         # (safe,maxlen,allow_digits,allow_html,allow_otp,outstream,note)
+         mb=MsgBodyFilter(cmdargs.safe,cmdargs.maxlen,cmdargs.digits,cmdargs.allow,
+                          cmdargs.otp,file, note='Unknown content type')
+         if cmdargs.forward:
+            mb.add_forward(msg)
+
+         mb.add_body(payload)
+         mb.close()
+
          return main_rc_NOCONTENT
       else:
-         raise UserWarning("No content type or message playload: "+str(type(payload)))
+         raise sm_exception("No content type or message playload: "+str(type(payload)))
 
    if not isinstance(contype,str):
-      raise UserWarning("Unknown content type: "+str(type(contype)))
+      raise sm_exception("Unknown content type: "+str(type(contype)))
 
    #print("Content-Type:",type(contype))	#DEBUG
    textcontent=False
@@ -1005,9 +1248,18 @@ def main(args):
    if contype[:4] == 'text':
       # We decode the payload in order to process it.
       pay1=msg.get_payload(decode=True)
+      # (safe,maxlen,allow_digits,allow_html,allow_otp,outstream,note)
+      mb=MsgBodyFilter(cmdargs.safe,cmdargs.maxlen,cmdargs.digits,cmdargs.allow,
+                       cmdargs.otp,file, note='Unknown content type')
       if contype[:10] == 'text/plain':
          # This is what we like to see.....
-         output_msgbody(pay1,cmdargs,forward_msg)
+         output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
+         if cmdargs.forward:
+            mb.add_forward(msg)
+
+         mb.add_body(pay1)
+         mb.close()
+
          return 0
       else:
          # Content is text, but not plain. Probably html.
@@ -1040,4 +1292,11 @@ def main(args):
    # END main
 
 if __name__ == "__main__":
-   sys.exit(main(sys.argv[1:]))
+   # TODO: add a module_init function to make unit-testing easier?
+   #		- not much of anything to put in it at this point.
+
+   try:
+      sys.exit(main(sys.argv[1:]))
+   except sm_exception,e:
+      e.report()
+
