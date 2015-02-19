@@ -1017,6 +1017,7 @@ def process_parts(msg,opt):
    # Assign to separate list, because we might be modifying msg while
    # iterating.
    parts = msg.get_payload()
+   orig_len=len(parts)
    for i in xrange(len(parts)-1,-1,-1):
       # iterate backwards to allow deletion in-place
       part=parts[i]
@@ -1066,6 +1067,14 @@ def process_parts(msg,opt):
       # All parts were deleted
       return False
 
+   # If some parts were removed, need to update the multi-part payload
+   # to reflect this.
+   if len(parts) != orig_len:
+      # TODO: test a bit then try this.
+      # msg.set_payload(parts)
+      diagout("TBD: Some parts deleted.")
+
+   return True
    # END multipart_html
 
 def multipart(msg,opt,file=sys.stdout):
