@@ -937,6 +937,19 @@ def scantext(msg):
    '''Extract the text/* parts of a multi-part message.
    Returns a list of the text/plain, other text/ parts
    and a count of all the parts.'''
+   # TODO: re-consider this design.
+   # - how nested are real email messages I would forward as text/plain?
+   # - does it really make sense to use walk in the text/plain case, or, should
+   #   I only consider top-level text/plain components?
+   # - some of this depends on how a mail-client would render a nested multi-part
+   #   message with different types of content.
+   # - I don't think I can use .walk() to compose a nested multi-part email,
+   #   because some structure is missing in the output from .walk()
+   # - Does the depth-first order from .walk() really make sense when presenting
+   #   a message to the user?
+   # - How do popular mail-clients actually present deeply nested  messages
+   #   to the user?
+
    pt=[]
    other=[]
    total=0
@@ -963,39 +976,46 @@ def multipart(msg,opt,file=sys.stdout):
    # from the original message, after obscuring each payload, if
    # required.
 
+   # (safe,maxlen,allow_digits,allow_html,allow_otp,outstream,note)
+   mb=MsgBodyFilter(opt.safe,opt.maxlen,opt.digits,opt.allow,opt.otp,file)
+   output_msgheader(msg,opt.forward,opt.unaddressed,file=file)
+   print(file=file)
    note=None
+
    if len(plain) == 0:
       # no plaintext portion
 
-      payload="none"
-      note="No text/plain in this %d part message" % (total)
+      mb.set_note("No text/plain in this %d part message" % (total))
+      mb.add_body("none")
+
+      # TODO: re-scan for text/html
+
       rc=3	# no text/plain
    else:
       payload=plain[0].get_payload(decode=True)
 
       rc=0
       if len(plain) == 1:
-         note="single text/plain of %d parts" % (total)
+         mb.set_note("single text/plain of %d parts" % (total))
+         mb.add_body(payload)
       else:
          # there are multiple plaintext portions in this message.
          #
          remaining=len(plain)-1
+         # currently .set_note must not be called more than once
+         mb.set_note("%d text/plain parts omitted." % (remaining))
+         mb.add_body(payload)
          for part in plain[1:]:
-            if len(payload) > opt.maxlen:
+            # TODO: look into 'comment' after each part.
+            payload = part.get_payload(decode=True)
+            if len(payload) > mb.remaining:
                rc=2	# truncated
-               note="%d text/plain parts omitted." % (remaining)
                break
+            mb.add_body(payload)
             remaining -= 1
-            payload += "\n---\n" + part.get_payload(decode=True)
+            mb.note="%d text/plain parts omitted." % remaining
+         mb.note="no further text/plain parts"
 
-   output_msgheader(msg,opt.forward,opt.unaddressed,file=file)
-   print(file=file)
-
-   # TODO: rework to output_msgheader, create MsgBodyFilter, then iterate
-   #	through each plaintext portion
-
-   # (safe,maxlen,allow_digits,allow_html,allow_otp,outstream,note)
-   mb=MsgBodyFilter(opt.safe,opt.maxlen,opt.digits,opt.allow,opt.otp,file,note=note)
    if opt.forward:
       mb.add_forward(msg)
 
