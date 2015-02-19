@@ -898,22 +898,23 @@ def hidecodes(txt):
 
 def output_msgheader(msg,forward_mode,unaddressed,file=sys.stdout):
    '''Output the email header, given an existing message.
-   This is really only going to handle a single-part message with
-   a content type of text/plain; ... For more sophisticated messages
+   This can be used to compose a single-part message based on content
+   from an existing message.  For more sophisticated messages,
    the email module should be used to compose.
    In forward_mode=True, only the Subject header is output, so additional
    information must be provided to the the MTA in order to send this message.
-   In relay/redirect mode (forward_mode=False) all the message headers
-   are output (except Content-type) such that this message could be passed
-   to the MTA
-   without additional information, assuming the original message
-   was valid. Note that the CALLER must output a blank line after
+   In relay/redirect mode (forward_mode=False) more message headers
+   are output. The Content-type is not included, nor is the destination.
+   Depending on the unaddressed flag, the source may also be omitted.
+   When passing this message to the MTA, a new destination must be
+   provided. Note that the CALLER must output a blank line after
    the message header, prior to the body of the message.'''
    if forward_mode:
       print("Subject:",msg['subject'],file=file)
-      return
+      return	# only the subject is included
 
    for k in msg.keys():
+      # Mime and content type fields are not included.
       if k.upper()[:8]=="CONTENT-": continue
       if k.upper()[:4]=="MIME": continue
       # It seems to me that most signatures will not be valid either
@@ -922,9 +923,16 @@ def output_msgheader(msg,forward_mode,unaddressed,file=sys.stdout):
       if k.upper()[:9]=="DOMAINKEY": continue
       if k.upper()[:4]=="DKIM": continue
       if k.upper()[:13]=="AUTHENICATION": continue
+      # Message destination is not included because it is assumed that
+      # a new destination will be provided when this message is passed
+      # to the MTA.
       if k.upper() == "TO": continue
       if k.upper() == "DELIVERED-TO": continue
       if unaddressed:
+         # The unaddressed flag omits sender information from the message
+         # which might be required to pass certain message relays. If sender
+         # information is omitted here, then a new sending address will likely
+         # be added by MTA.
          if k.upper() == "FROM": continue
          if k.upper() == "RETURN-PATH": continue
          if k.upper() == "SENDER": continue
@@ -962,22 +970,123 @@ def scantext(msg):
          other.append(part)
    return (pt,other,total)
 
+#
+# So now we have three different handlers for mail messages.
+# - In main() we handle a single-part message (text/plain or text/html).
+#   - only a single-part output of type text/plain or text/html is
+#     produced.
+@
+# - In multipart() we handle a multi-part message, but only the text/plain
+#   sections, producing a single-part output.
+#
+# - In multipart_full() we will try and handle text/plain, text/html including
+#   nested sections. The multipart_full() function will not apply length
+#   restrictions. If there are length restrictions, then the message must
+#   be handled by main() or multipart().
+#
+def multipart_full(msg,opt,file):
+   '''Handle a multi-part message, including nesting and text/html/
+   Length restrictions may not be handled by this method.'''
+   # To create a multi-part nested message there are two options:
+   # 1. Walk the incoming message, delete unwanted sections,
+   #    sanitize payloads. This approach depends on APIs that allow
+   #    in-place modification of message contents.
+   # 2. Create a new message, copy headers and relevent sections
+   #    from the original message (recursively, sanitizing payloads).
+
+   # Approach 1
+
+   # Iterate through the contents of the message, recursively
+   process_parts(msg,opt)
+
+   # Iterate through the message headers
+   # This logic duplicates output_msgheader to some extent.
+   print('TBD',file)
+
+   # Write the entire message to the output stream
+   print('TBD',file)
+
+   return 0
+
+def process_parts(msg,opt):
+   '''Process a multi-part message.
+   Nested parts are handled recursively.
+   True is returned to indicate that there are still parts
+   remaining after processing. False indicates that all the
+   parts of a multi-part message were deleted.'''
+   # Assign to separate list, because we might be modifying msg while
+   # iterating.
+   parts = msg.get_payload()
+   for i in xrange(len(parts)-1,-1,-1):
+      # iterate backwards to allow deletion in-place
+      part=parts[i]
+      if part.is_multipart():
+         # Nested
+         if process_parts(part,opt):
+            # Some valid sub-parts remain
+            continue	# leave part in
+
+         # There is nothing left in this part
+         del parts[i]
+         continue
+
+      # Not nested
+      content = part['Content-type']
+      # For now delete anything that is not text
+      if content[:5] != 'text/':
+         del parts[i]
+         continue
+
+      # Delete anything other than text/plain unless allowed by options.
+      if content[:10] != 'text/plain' and not opt.allow:
+         del parts[i]
+         continue
+
+      # So, this part will remain. Need to sanitize payload
+      payload = part.get_payload(decode=True)
+      newpay = cStringIO.StringIO()
+
+      # (safe,maxlen,allow_digits,allow_html,allow_otp,outstream,note)
+      mb=MsgBodyFilter(opt.safe,opt.maxlen,opt.digits,opt.allow,opt.otp,newpay)
+      mb.add_body(payload)
+      mb.close()
+      # Now newpay should contain sanitized payload.
+      # Question: do I need to fix charset or re-encode, based on the
+      # part["Content-Transfer-Encoding"] header?
+      # Currently, I see mainly: quoted-printable, 7bit, 8bit, base64
+      # It is not clear if set_payload will properly re-encode.
+      # https://docs.python.org/2/library/email.mime.html implies that
+      # .set_payload can re-encode in some cases.
+      # TODO: investigate, do some diffs of before and after.
+      part.set_payload(newpay.getvalue())
+
+      # end of loop
+
+   if not parts:
+      # All parts were deleted
+      return False
+
+   # END multipart_html
+
 def multipart(msg,opt,file=sys.stdout):
    '''Handle a multi-part message.
    Takes the message and the command-line options. Note options
    can be any Namespace or object which has the fields we want:
    safe, forward, plain, allow, digits, otp'''
 
+   if opt.maxlen > 60000 and opt.allow:
+      # To support long messages, including html and nesting,
+      # we use the multipart_full() function.
+      return multipart_full(msg,opt,file)
+
+   # Walk the parts of the message, get plain, other text and count.
    (plain,other,total) = scantext(msg)
 
-   # TODO: handle opt.allow (allow other text/)
-   # To properly pass multiple parts we would need to compose
-   # a new multi-part message using each content type and payload
-   # from the original message, after obscuring each payload, if
-   # required.
+   # Compose a single-part output message
 
    # (safe,maxlen,allow_digits,allow_html,allow_otp,outstream,note)
    mb=MsgBodyFilter(opt.safe,opt.maxlen,opt.digits,opt.allow,opt.otp,file)
+
    output_msgheader(msg,opt.forward,opt.unaddressed,file=file)
    print(file=file)
    note=None
@@ -1155,6 +1264,7 @@ def main(args):
       pay1=msg.get_payload(decode=True)
       if contype[:10] == 'text/plain':
          # This is what we like to see.....
+         # Compose a single-part message with the text/plain payload.
          output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
          if cmdargs.forward:
             mb.add_forward(msg)
@@ -1166,6 +1276,9 @@ def main(args):
       else:
          # Content is text, but not plain. Probably html.
          if cmdargs.allow:
+            # Compose a single-part message, with the same content-type
+            # as the incoming message.
+
             output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
             # but now, we need to put back mime/content type
             # that output_msgheader does not include.
@@ -1178,6 +1291,8 @@ def main(args):
                mb.add_forward(msg)
             mb.add_body(pay1)
          else:
+            # Compose a single-part message, with just a note.
+
             output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
             print()
             mb.set_note("no text/plain in message")
@@ -1189,6 +1304,7 @@ def main(args):
          return main_rc_NOPLAIN
 
    # This is not text
+   # Compose a single-part message, with just a note.
    output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
    print()
    mb.set_note("no text in messsage")
