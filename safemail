@@ -462,6 +462,7 @@ html_prefix=[
  '1px;',
  '6px;',
  '10px;',
+ '40px;',
  'a2Column',
  'a3Column',
  'a4Column',
@@ -483,6 +484,7 @@ html_prefix=[
  'charset',
  'classification',
  'class',
+ 'display',
  'family',
  'font-family',
  'font-size',
@@ -523,7 +525,8 @@ html_prefix=[
  ]
 html_word_punc=bytearray('=:;>,')
 
-html_suffix=['</a','</div','</p','</span','<table','</td','text-decoration']
+html_suffix=[
+ '</a','>Add','</div','</p','</span','<table','</td','text-decoration']
 
 def strip_htmlword(word):
    '''Remove some html words and puntucation.
@@ -842,9 +845,14 @@ def is_safe(txtline,allow_otp,allow_html):
 
       if is_code_debug:		is_code_log_debug(orig,word,n)
 
+      # Get the maximum code for the line.
       if n > code: code=n
 
    #print("is_safe(%d)" % (code),txtline,file=sys.stderr) #DEBUG
+
+   # If the maximum code for the line is to high, we obscure the
+   # entire line. For HTML with long lines, this will obscure more
+   # than we would like.
 
    if allow_otp:
       if code > is_code_NUMBER: return False
