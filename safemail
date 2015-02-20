@@ -917,10 +917,11 @@ def output_msgheader(msg,forward_mode,unaddressed,file=sys.stdout):
       print("Subject:",msg['subject'],file=file)
       return	# only the subject is included
 
-   for k in msg.keys():
-      # Mime and content type fields are not included.
-      if k.upper()[:8]=="CONTENT-": continue
-      if k.upper()[:4]=="MIME": continue
+   for (k,v) in msg.items():
+      # Leave in mime and content
+      #if k.upper()[:8]=="CONTENT-": continue
+      #if k.upper()[:4]=="MIME": continue
+
       # It seems to me that most signatures will not be valid either
       # because the message is modified..... The MTA would have to
       # re-sign the message based on the new content, right?
@@ -941,7 +942,7 @@ def output_msgheader(msg,forward_mode,unaddressed,file=sys.stdout):
          if k.upper() == "RETURN-PATH": continue
          if k.upper() == "SENDER": continue
 
-      print("%s:" % (k),msg[k],file=file)
+      print("%s:" % (k),v,file=file)
 
    # END output_msgheader
 
@@ -1418,9 +1419,6 @@ def main(args):
          # as the incoming message.
 
          output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
-         # but now, we need to put back mime/content type
-         # that output_msgheader does not include.
-         print("Content-Type:",contype)
          print()
          # Not sure it is valid to include non-html stuff
          # so I might have to remove the forward stuff.
