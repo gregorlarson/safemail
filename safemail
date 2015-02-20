@@ -925,6 +925,9 @@ def output_msgheader(msg,forward_mode,unaddressed,file=sys.stdout):
       print("Subject:",msg['subject'],file=file)
       return	# only the subject is included
 
+   # Problem: forward_mode is omitting some MIME and CONTENT- that is
+   # needed when forwarding a single-part text/html message.
+
    for (k,v) in msg.items():
       # Leave in mime and content
       #if k.upper()[:8]=="CONTENT-": continue
