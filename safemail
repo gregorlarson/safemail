@@ -27,6 +27,8 @@
 
 from __future__ import print_function
 import os,sys,random,cStringIO,email
+import email.generator
+#import email.mime.text		# not used for now
 
 re_setup_done=False
 def setup_re():
@@ -94,7 +96,7 @@ class MsgBodyFilter:
       self.remaining=maxlen
       self.allow_digits=allow_digits
       self.allow_html=allow_html
-      self.allow_opt=allow_otp
+      self.allow_otp=allow_otp
       self.outstream=outstream
       self.set_note(note)
 
@@ -252,7 +254,7 @@ class MsgBodyFilter:
          if self.safe:
             # Safe mode
             if self.allow_digits or self.allow_otp:
-               if not is_safe(w,self.allow_otp,self.allow_http):
+               if not is_safe(w,self.allow_otp,self.allow_html):
                   hidecodes(w)	# hidecodes modifies w bytearray
             else:
                hidecodes(w)	# hidecodes modifies w bytearray
@@ -975,7 +977,7 @@ def scantext(msg):
 # - In main() we handle a single-part message (text/plain or text/html).
 #   - only a single-part output of type text/plain or text/html is
 #     produced.
-@
+#
 # - In multipart() we handle a multi-part message, but only the text/plain
 #   sections, producing a single-part output.
 #
@@ -999,12 +1001,105 @@ def multipart_full(msg,opt,file):
    # Iterate through the contents of the message, recursively
    process_parts(msg,opt)
 
+   # When forwarding a multi-part html message, do we insert a
+   # text/plain part at the beginning with the forward text?
+   # Should I add the forward text to the .preample between
+   # the end of the headers and the first multipart boundary?
+   # What if there is already a .preamble?
+   # It seems text added to preample is not often visible in a mail
+   # reader, however, based on the other things I have tried below,
+   # I think the best approach for now is to put some diagnostic
+   # info in the .preamble
+   #
+   # if opt.forward:
+   fwd=" From: %s\n To: %s\n Date: %s\n " % (
+        msg["from"],msg["to"],msg["date"])
+   fwd += " ".join(sys.argv)	#DEBUG
+   fwd += "\n"
+
+   if msg.preamble:
+      msg.preamble=fwd+msg.preamble
+   else:
+      msg.preamble=fwd
+
+   # The following seemed to work to the extent that it allowed me to
+   # add a text section to the start or end of the message, however,
+   # it did not display properly on the mail clients.
+   #	TODO: try adding an HTML section to beginning?
+   #
+   #	fwdmsg=email.message.Message()
+   #	fwdmsg=email.mime.text.MIMEText(fwd)
+   #	fwdmsg.set_payload(fwd)
+   #
+   # If we use .attach, it will be appended to the end of the
+   # message, which is not exactly what we want, also, it became
+   # the only part visible in some mail readers (thunderbird).
+   #
+   #	msg.attach(fwdmsg)
+   #
+   # If we put the text as the first section, it does not appear
+   # when viewing, because mail-readers prefer to show the html.
+   #
+   #	parts=[fwdmsg]+msg.get_payload()
+   #	msg.set_payload(parts)
+
    # Iterate through the message headers
-   # This logic duplicates output_msgheader to some extent.
-   print('TBD',file)
+   # TODO: see if it would be better to do this before
+   #       process_parts
+
+   # WARNING:  This logic duplicates output_msgheader
+   keys=msg.keys()	# modify while iterating....
+   for k in keys:
+      # Content type field needed.
+      if k.upper()[:8]=="CONTENT-":
+         continue
+      # Not sure if mime needed
+      elif k.upper()[:4]=="MIME":
+         continue
+      elif opt.forward:
+         if k.upper()[:7]!="SUBJECT":
+      	    # only the subject is included when forwarding
+            del msg[k]
+
+      # It seems to me that most signatures will not be valid either
+      # because the message is modified..... The MTA would have to
+      # re-sign the message based on the new content, right?
+      elif k.upper()[:9]=="DOMAINKEY": 
+         del msg[k]
+      elif k.upper()[:4]=="DKIM":
+         del msg[k]
+      elif k.upper()[:13]=="AUTHENICATION":
+         del msg[k]
+      # Message destination is not included because it is assumed that
+      # a new destination will be provided when this message is passed
+      # to the MTA.
+      elif k.upper() == "TO":
+         del msg[k]
+      elif k.upper() == "DELIVERED-TO":
+         del msg[k]
+      elif opt.unaddressed:
+         # The unaddressed flag omits sender information from the message
+         # which might be required to pass certain message relays. If sender
+         # information is omitted here, then a new sending address will likely
+         # be added by MTA.
+         if k.upper() == "FROM":
+            del msg[k]
+         if k.upper() == "RETURN-PATH":
+            del msg[k]
+         if k.upper() == "SENDER":
+            del msg[k]
+
+   # Should I add a .epilogue with some results from the
+   # processing?
 
    # Write the entire message to the output stream
-   print('TBD',file)
+   # Not sure about performance of as_string() for very large
+   # messages. Seems like the correct way to do this is via a
+   # generator:
+   # https://docs.python.org/2/library/email.generator.html
+   #
+   gen=email.generator.Generator(file)
+   gen.flatten(msg)
 
    return 0
 
@@ -1043,7 +1138,10 @@ def process_parts(msg,opt):
          del parts[i]
          continue
 
-      # So, this part will remain. Need to sanitize payload
+      # So, this part will remain.
+      if not opt.safe: continue
+
+      # Need to sanitize payload
       payload = part.get_payload(decode=True)
       newpay = cStringIO.StringIO()
 
@@ -1059,6 +1157,7 @@ def process_parts(msg,opt):
       # https://docs.python.org/2/library/email.mime.html implies that
       # .set_payload can re-encode in some cases.
       # TODO: investigate, do some diffs of before and after.
+      # TODO: figure out if long lines will be a problem.
       part.set_payload(newpay.getvalue())
 
       # end of loop
@@ -1083,7 +1182,7 @@ def multipart(msg,opt,file=sys.stdout):
    can be any Namespace or object which has the fields we want:
    safe, forward, plain, allow, digits, otp'''
 
-   if opt.maxlen > 60000 and opt.allow:
+   if opt.maxlen > 50000 and opt.allow:
       # To support long messages, including html and nesting,
       # we use the multipart_full() function.
       return multipart_full(msg,opt,file)
@@ -1209,7 +1308,7 @@ def main(args):
    	obscuring some dates and phone numbers and you want to allow more
    	of the text/html to work. Has no effect without --safe.''')
 
-   parser.add_argument('--maxlen','-m',action='store',type=int, default=60000, help=
+   parser.add_argument('--maxlen','-m',action='store',type=int, default=300000, help=
    	'''Set a maximum length of the output message body.''')
 
    cmdargs=parser.parse_args(args)
