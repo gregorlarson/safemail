@@ -9,7 +9,7 @@ The good things about this approach are that the Provider is leverging the email
    - If the email address is associated with the Members residential internet service, then there may also be local offices and support staff who can assure identity.
    - If the email address is provided incidental to employment or membership in another organization, then there are IT staff who will help assure the identity of the person with that address.
    - Some of the big free email providers (Google, Microsoft, Apple) now have very sophisticated account security procedures using mutli-factor authentication and phone number OTP delivery.
-   - If the email address is associated with their Domain registrar or Hosting provider, there are other systems, billing arrangements and staff who can assure identity, however, there is more risk of a circular authentication dependancy here (see below).
+   - If the email address is associated with their Domain registrar or Hosting provider, there are other systems, billing arrangements and staff who can assure identity, however, there is more risk of a circular authentication dependency here (see below).
 
 ### The Bad
 Using email as a secondary authentication mechanism is really using email for something it was not designed for. It is *overloading* communication and authentication. In fact, using email addresses in this way is creating a security contradiction where we want email to be easy to access, and things like password-resets to be very difficult to access. Because the same email address will be used for communication and authentication, you can't simply lock-down the email address and only check it once or twice a year (or when you need a security override). In an organization, there may be more than one individual who should recieve emails from an important service provider.
@@ -26,15 +26,15 @@ Because email must be very available to be useful, it is also more exposed to th
 
 A person who checks their email 20 times a day is unlikely to enter a long password each time.
 
-For these reasons, an email **access** theft is often the first step in a ugly security breach.  I consider an email **access* theft a situation where the user does not loose full control of their email account, however, the contents of their email become accessible by an attacker:
+For these reasons, an email **access** theft is often the first step in a ugly security breach.  I consider an email *access* theft a situation where the user does not loose full control of their email account, however, the contents of their email become accessible (for some period of time) by an attacker:
    - A device with access to the email is misplaced or stolen.
-   - A user forgets to log out or lock their terminal.
+   - A user forgets to log out or lock their terminal or browser.
    - The user uses forwarding rules to access their mail in different situations.
-   - Often there is a social component where the executive who is the one who will act on an email message is not trained or thinking about system security.
+   - Often there is a social component where the executive who is the one who will act on an email messages (and therefor must get them promptly) is not trained or thinking about system security.
 
 The email provider likely understands that simple access to email contents should not enable take-over of the entire email account. The more sophisticated email providers use mutli-factor, application specific passwords and other mechanisms to prevent take-over of the account.
 
-If, however, the email address is being used by a 3rd-party provider as an authentication mechanism, we have an exposure. The attacker can use their there temporary access to the email or order to elevate their access, reset the account password and take over the 3rd party account.
+If, however, the email address is being used by a 3rd-party provider as an authentication mechanism, we have a serious exposure. The attacker can use their there temporary access to the email or order to elevate their access, reset the account password and take over the 3rd party account.
 
 ### The Ugly
 You have strong system passwords, safely stored in a good password vault, that you never use on an insecure device, never cache in a browser. Perhaps you even use multi-factor authentication...
