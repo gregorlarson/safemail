@@ -27,15 +27,250 @@
 
 from __future__ import print_function
 import os,sys,random,cStringIO,email
+import email.generator
+#import email.mime.text		# not used for now
 
 re_setup_done=False
 def setup_re():
-   '''Setup module global regular expressions.'''
+   '''Compile module global regular expressions.'''
    if re_setup_done: return
 
-   # Any string of more than 4 consecutive digits will be considered a code.
-   # Any url could be a code, however, if the URL does not contain a lot of
-   # material after the domain/ then it might be safe.
+stderr=sys.stderr		# module global stderr
+debug_level=None		# module global debug_level
+
+def diagout(*s,**k):
+ '''Diagnostic output messages go to stderr by default but
+    may be redirected globally, or using parameter.'''
+ out="".join([x.__str__() for x in s])
+
+ file=k.get('file')
+ if not file: file=stderr	# default to global stderr
+
+ print(out,file=file)
+ e=k.get('exception')
+ if e: print("   Exception:",e,file=file)
+ f=k.get('fatal')
+ if f:
+    # if debug, print a traceback?
+    sys.exit(7)
+
+class sm_exception(Exception):
+   '''Top level exception for this script. Optional second arg should
+      be underlying exception, if any.'''
+
+   def report(self,note=''):
+      '''Report the exception to operator, with optional note appended.'''
+
+      if debug_level:
+         exc_type, exc_value, exc_traceback = sys.exc_info()
+         # debug output always goes to sys.stderr
+         traceback.print_tb(exc_traceback, limit=3, file=sys.stderr)
+
+      if len(self.args) > 1:
+         if self.args[1]:
+            note=note+"\n   exception:"+self.args[1].__str__()
+
+      t=self._report()
+      if note:
+         if len(t) + len(note) > 78:
+            diagout(t,'\n',note)
+         else:
+            diagout(t+' '+note)
+      else:
+         diagout(t)
+
+   def _report(self):
+      'should be overridden in subclasses'
+      return 'safemail failure '+self.args[0]
+
+class UsageError(sm_exception):
+   '''Command was used incorrectly.'''
+   def _report(self):
+      return "safemail usage error:\n   "+self.args[0]
+
+class MsgBodyFilter:
+   '''A message body filter.'''
+   def __init__(self,safe,maxlen,allow_digits,allow_html,allow_otp,outstream,note=None):
+      self.safe=safe
+      self.maxlen=maxlen
+      self.remaining=maxlen
+      self.allow_digits=allow_digits
+      self.allow_html=allow_html
+      self.allow_otp=allow_otp
+      self.outstream=outstream
+      self.set_note(note)
+
+   def out_of_room(self):
+      return self.remaining < (self.note_len+20)
+
+   def set_note(self,note):
+      '''Suffix note for end of message, if space permits.
+      If multiple notes are provided, this will break. Some re-work
+      would be required to add or change notes.'''
+
+      self.note=note
+      if note:
+         # Note is printed with a prefix.
+         # Assuming note is final line in message body, we don't need to
+         # count newline.
+         self.note_len=len(note)+14
+      else:
+         self.note_len=0
+         return
+
+      # The note may not actually be included for short messages
+
+      if self.maxlen > 300:
+         # For longer max len, reserve space for the note.
+         self.remaining -= self.note_len
+      else:
+         # For short messages, note may be included if there is
+         # sufficient space.
+         self.note_len=0
+
+   def add_forward(self,msg):
+      '''Add some fields from original message header to the message body.'''
+      # In forward mode, some fields from the source message
+      # are included in the new message body.
+      # No hiding is done on these fields.
+      # The amount of detail included depends on the space remaining
+      # in the message.
+      # print(msg.keys())	#DEBUG
+      if self.remaining > 120:
+         extra="From: "+msg['from']
+         elen=len(extra)+1
+         print(extra,file=self.outstream)
+         self.remaining -= elen
+
+         if self.remaining > 200:
+            extra="To: "+msg['to']
+            elen=len(extra)+1
+            print(extra,file=self.outstream)
+            self.remaining -= elen
+
+            if self.remaining > 360:
+               extra="Date: "+msg['date']
+               elen=len(extra)+1
+               print(extra,file=self.outstream)
+               self.remaining -= elen
+
+         print(file=self.outstream)
+
+      # END add_forward
+
+   def add_body(self,payload,comment=None):
+      '''Add to outgoing message body given a string payload and optional
+      comment for end of section. Leading and trailing blank lines are removed.
+      Trailing white-space is removed.'''
+
+      # Could we not simply do payload.split('\n')? Would that be more
+      # efficient? Split is not
+      # a generator, however, there are some generator implementation of
+      # str.split that might be applied....
+      # http://stackoverflow.com/questions/3862010/is-there-a-generator-version-of-string-split-in-python/12764478#12764478
+      # It would be interesting to try a generator that yields bytearray rather
+      # than string.
+      # Mind you, cStringIO is likely pretty good, and I believe it is a generator.
+      inf=cStringIO.StringIO(payload)
+
+      # TODO: figure out if comment will fit and if it should be included.
+      #include_note=False
+      #if self.note_len > 0:
+      #   # A note was provided
+      #   elen=note_len
+      #   if self.maxlen > 300:
+      #      # For longer max len, include note even if it truncates payload.
+      #      self.remaining -= elen
+      #      include_note=True
+      #   elif len(payload)+elen < x.maxlen:
+      #      # For short max len, include note only if there is space.
+      #      include_note=True
+      #      self.remaining -= elen
+
+      trunc_note=None
+      if self.maxlen > 300:
+         # longer messages get a truncated indication at the end.
+         if len(payload) > self.remaining:
+            # add a truncated message to longer messages
+            trunc_note='.truncated'
+            # reserve space in message for .truncated note
+            self.remaining -= 11
+
+      truncated = self.pipe_body(inf)
+
+      if truncated and trunc_note:
+         print(trunc_note,file=self.outstream)
+
+      # END add_body
+
+   def close(self):
+      '''Complete output.'''
+
+      if self.note_len > 0:
+         print("-safemail---",self.note,file=self.outstream)
+         # length account for earlier
+         self.note_len=0
+
+   def pipe_body(self,instream):
+      '''Pipe data into body, update self.remaining.
+      Returns False if all input data was handled.
+      Returns True if input data was truncated.
+      Leading and trailing blank lines are stripped.
+      Trailing white space is stripped.
+      Output may be sanitized, based on initial flags.'''
+
+      leadin=True
+      blank=0
+      truncated=False
+
+      w=bytearray()
+      # TODO: move to self.trailing_junk or make global
+      trailing_junk=bytearray('\n\r\t ')
+      for line in instream:
+         # line is always str, but we put in bytearry for faster manipulation.
+         w[0:]=line
+         # remove trailing junk from line
+         while w and w[-1] in trailing_junk:	# assumes short-circut eval
+            del w[-1]
+
+         if not w:
+            # blank line
+            if leadin:
+               continue		# suppress leading blank lines
+            blank += 1		# count blank line
+            continue
+
+         leadin=False		# past initial blank lines
+         if blank > 0:
+            # collapse multiple blank lines to a single blank line.
+            print(file=self.outstream)
+            self.remaining -= 1
+            blank=0
+
+         if self.remaining < 3:
+            truncated=True
+            break
+
+         if self.safe:
+            # Safe mode
+            if self.allow_digits or self.allow_otp:
+               if not is_safe(w,self.allow_otp,self.allow_html):
+                  hidecodes(w)	# hidecodes modifies w bytearray
+            else:
+               hidecodes(w)	# hidecodes modifies w bytearray
+
+         d=self.remaining - len(w)
+         if d < 0:
+            # Current line won't fit.
+            del w[d:]
+            truncated=True
+
+         print(w,file=self.outstream)
+         self.remaining -= (len(w)+1)
+         if truncated: break
+
+      return truncated
+      # END pipe_body
 
 #
 # The following several functions deal with trying to figure out
@@ -114,8 +349,8 @@ def lens(txt):
    return (digits,lower,upper,punc,colon,late_upper,middle_digits)
 
 def is_code_log(word):
-  if len(word.strip()) == 0: raise UserWarning
-  if word[:4] == '&gt;': raise UserWarning(word)
+  if len(word.strip()) == 0: raise UserWarning		#DEBUG
+  if word[:4] == '&gt;': raise UserWarning(word)	#DEBUG
 
 def is_code_trace(word,digits,rc):
   '''TODO: use this to create a tool that allows me to inspect
@@ -198,14 +433,14 @@ def strip_cents(word):
 
    if len(word) < 3:			return False
    if word[-3] != ord('.'):		return False
-    
+
    if len(word) > 3:
       # check digits before dot
       if not word[:-3].isdigit():	return False
 
    # check digits after dot
    if not word[-2:].isdigit():		return False
-   
+
    del word[-3:]	# delete the dot cents
    return True		# return True to indicate modification
 
@@ -227,6 +462,7 @@ html_prefix=[
  '1px;',
  '6px;',
  '10px;',
+ '40px;',
  'a2Column',
  'a3Column',
  'a4Column',
@@ -248,6 +484,7 @@ html_prefix=[
  'charset',
  'classification',
  'class',
+ 'display',
  'family',
  'font-family',
  'font-size',
@@ -288,7 +525,8 @@ html_prefix=[
  ]
 html_word_punc=bytearray('=:;>,')
 
-html_suffix=['</a','</div','</p','</span','<table','</td','text-decoration']
+html_suffix=[
+ '</a','>Add','</div','</p','</span','<table','</td','text-decoration']
 
 def strip_htmlword(word):
    '''Remove some html words and puntucation.
@@ -394,7 +632,7 @@ def is_code(word,codemin=4,longmin=5,allow_html=False):
             if is_code(hyph2[0],codemin=codemin-1) == 0:
                if is_code(hyph2[1],codemin=codemin-1) == 0:
                   return 0   # let simple 2-part @ email with almost no digits go
-      
+
       # Few digits
       # In many ways, we should tree this like zero digits.
 
@@ -423,7 +661,7 @@ def is_code(word,codemin=4,longmin=5,allow_html=False):
             return is_code_SHORTCODE
 
          return 0
-            
+
       if wl < 10:
          # 5-9 chars, may include some digits.
 
@@ -538,7 +776,7 @@ def is_code(word,codemin=4,longmin=5,allow_html=False):
       if punc>0 and punc<3 and lateup==0 and wl<18 and (upper==0 or lower==0):
          is_code_wonder(word)
          return 0	# let it go, could just be a domain or hyphenated
-         
+
       # Here I could allow for a non-complex URL or email address
       if digits == 0: is_code_log(word)
       return is_code_LONGCODE
@@ -607,9 +845,14 @@ def is_safe(txtline,allow_otp,allow_html):
 
       if is_code_debug:		is_code_log_debug(orig,word,n)
 
+      # Get the maximum code for the line.
       if n > code: code=n
 
    #print("is_safe(%d)" % (code),txtline,file=sys.stderr) #DEBUG
+
+   # If the maximum code for the line is to high, we obscure the
+   # entire line. For HTML with long lines, this will obscure more
+   # than we would like.
 
    if allow_otp:
       if code > is_code_NUMBER: return False
@@ -663,164 +906,85 @@ def hidecodes(txt):
 
    return txt
 
-def output_msgheader(msg,foward_mode,unaddressed,file=sys.stdout):
+def output_msgheader(msg,forward_mode,unaddressed,file=sys.stdout):
    '''Output the email header, given an existing message.
-   This is really only going to handle a single-part message with
-   a content type of text/plain; ... For more sophisticated messages
+   This can be used to compose a single-part message based on content
+   from an existing message.  For more sophisticated messages,
    the email module should be used to compose.
    In forward_mode=True, only the Subject header is output, so additional
    information must be provided to the the MTA in order to send this message.
-   In relay/redirect mode (forward_mode=False) all the message headers
-   are output (except Content-type) such that this message could be passed
-   to the MTA
-   without additional information, assuming the original message
-   was valid. Note that the CALLER must output a blank line after
+   In relay/redirect mode (forward_mode=False) more message headers
+   are output. The Content-type is not included, nor is the destination.
+   Depending on the unaddressed flag, the source may also be omitted.
+   When passing this message to the MTA, a new destination must be
+   provided. Note that the CALLER must output a blank line after
    the message header, prior to the body of the message.'''
-   if foward_mode:
-      print("Subject:",msg['subject'],file=file) # should be in header
+
+   # WARNING: some logic here is duplicated in multipart_full()
+
+   if forward_mode:
+      for (k,v) in msg.items():
+         # In the forward case, we keep only a few fields necessary to
+         # display the content.
+         if k.upper()[:7] == "SUBJECT":
+            print("%s:" % (k),v,file=file)
+         elif k.upper()[:12]=="CONTENT-TYPE":
+            print("%s:" % (k),v,file=file)
+         elif k.upper()[:4]=="MIME":
+            print("%s:" % (k),v,file=file)
+
       return
 
-   for k in msg.keys():
-      if k.upper()[:8]=="CONTENT-": continue
-      if k.upper()[:4]=="MIME": continue
+   # Problem: forward_mode is omitting some MIME and CONTENT- that is
+   # needed when forwarding a single-part text/html message.
+
+   for (k,v) in msg.items():
+
+      # Leave in mime and content
+      #if k.upper()[:8]=="CONTENT-": continue
+      #if k.upper()[:4]=="MIME": continue
+
       # It seems to me that most signatures will not be valid either
       # because the message is modified..... The MTA would have to
       # re-sign the message based on the new content, right?
       if k.upper()[:9]=="DOMAINKEY": continue
       if k.upper()[:4]=="DKIM": continue
       if k.upper()[:13]=="AUTHENICATION": continue
+      # Message destination is not included because it is assumed that
+      # a new destination will be provided when this message is passed
+      # to the MTA.
       if k.upper() == "TO": continue
       if k.upper() == "DELIVERED-TO": continue
       if unaddressed:
+         # The unaddressed flag omits sender information from the message
+         # which might be required to pass certain message relays. If sender
+         # information is omitted here, then a new sending address will likely
+         # be added by MTA.
          if k.upper() == "FROM": continue
          if k.upper() == "RETURN-PATH": continue
          if k.upper() == "SENDER": continue
 
-      print("%s:" % (k),msg[k],file=file)
-      
-def output_msgbody(payload,opt,note=None,forward_msg=None,file=sys.stdout):
-   '''Output a message body given a string payload.
-   The command opt, from argparse, or just any Namespace with fields:
-   safe - obscure codes, digits - allow digits, otp - allow otp.
-   Optionally add additional fields from provided forward_msg into the
-   message body. Note that caller must handle the message header and
-   output the blank line after the message header because this code
-   will suppress leading and trailing blank lines. 
-   Trailing white-space and repeated blank lines are deleted.
-   payload may be str or bytearry, it is not changed.'''
+      print("%s:" % (k),v,file=file)
 
-   if forward_msg:
-      # In forward mode, some fields from the source message
-      # are included in the new message body.
-      # print(forward_msg.keys())
-      if opt.maxlen > 120:
-         extra="From: "+forward_msg['from']
-         elen=len(extra)+1
-         print(extra,file=file)
-         opt.maxlen -= elen
-
-         if opt.maxlen > 200:
-            extra="To: "+forward_msg['to']
-            elen=len(extra)+1
-            print(extra,file=file)
-            opt.maxlen -= elen
-         
-            if opt.maxlen > 360:
-               extra="Date: "+forward_msg['date']
-               elen=len(extra)+1
-               print(extra,file=file)
-               opt.maxlen -= elen
-         
-         print(file=file)
-
-   # Could we not simply do payload.split('\n')? Would that be more
-   # efficient? Split is not
-   # a generator, however, there are some generator implementation of
-   # str.split that might be applied....
-   # http://stackoverflow.com/questions/3862010/is-there-a-generator-version-of-string-split-in-python/12764478#12764478
-   # It would be interesting to try a generator that yields bytearray rather
-   # than string.
-   # Mind you, cStringIO is likely pretty good, and I believe it is a generator.
-   inf=cStringIO.StringIO(payload)
-  
-   leadin=True
-   blank=0
-
-   include_note=False
-   if note:
-      # A note was provided
-      elen=len(note) + 14
-      if opt.maxlen > 300:
-         # For longer max len, include note even if it truncates payload.
-         opt.maxlen -= elen
-         include_note=True
-      elif len(payload)+elen < opt.maxlen:
-         # For short max len, include note only if there is space.
-         include_note=True
-         opt.maxlen -= elen
-
-   trunc_note=None
-   truncated=False
-   if opt.maxlen > 270:
-      # longer messages get a truncated indication at the end.
-      if len(payload) > opt.maxlen:
-         # add a truncated message to longer messages
-         trunc_note='.truncated'
-         opt.maxlen -= 11
-
-   w=bytearray()
-   trailing_junk=bytearray('\n\r\t ')
-   for line in inf:
-      if opt.maxlen < 3:
-         truncated=True
-         break
-
-      # line is always str, but we put in bytearry for faster manipulation.
-      w[0:]=line
-      # remove trailing junk from line
-      while w and w[-1] in trailing_junk:	# assumes short-circut eval
-         del w[-1]
-
-      if not w:
-         if leadin:
-            continue		# suppress leading blank lines
-         blank += 1		# count blank line
-         continue
-
-      leadin=False
-      if blank > 0:
-         # collapse multiple blank lines to a single blank line.
-         print(file=file)
-         opt.maxlen -= 1
-         blank=0
-
-      if opt.safe:
-         if opt.digits or opt.otp:
-            if not is_safe(w,opt.otp,opt.allow):
-               hidecodes(w)	# hidecodes modifies w bytearray
-         else:
-            hidecodes(w)	# hidecodes modifies w bytearray
-
-      d=opt.maxlen - len(w)
-      if d < 0:
-         # Current line won't fit.
-         del w[d:]
-         truncated=True
-
-      print(w,file=file)
-      opt.maxlen -= (len(w)+1)
-
-   if truncated and trunc_note:
-      print(trunc_note,file=file)
-
-   if include_note:
-      print("-safemail---",note,file=file)
-      # length account for earlier
+   # END output_msgheader
 
 def scantext(msg):
    '''Extract the text/* parts of a multi-part message.
    Returns a list of the text/plain, other text/ parts
    and a count of all the parts.'''
+   # TODO: re-consider this design.
+   # - how nested are real email messages I would forward as text/plain?
+   # - does it really make sense to use walk in the text/plain case, or, should
+   #   I only consider top-level text/plain components?
+   # - some of this depends on how a mail-client would render a nested multi-part
+   #   message with different types of content.
+   # - I don't think I can use .walk() to compose a nested multi-part email,
+   #   because some structure is missing in the output from .walk()
+   # - Does the depth-first order from .walk() really make sense when presenting
+   #   a message to the user?
+   # - How do popular mail-clients actually present deeply nested  messages
+   #   to the user?
+
    pt=[]
    other=[]
    total=0
@@ -833,54 +997,294 @@ def scantext(msg):
          other.append(part)
    return (pt,other,total)
 
+#
+# So now we have three different handlers for mail messages.
+# - In main() we handle a single-part message (text/plain or text/html).
+#   - only a single-part output of type text/plain or text/html is
+#     produced.
+#
+# - In multipart() we handle a multi-part message, but only the text/plain
+#   sections, producing a single-part output.
+#
+# - In multipart_full() we will try and handle text/plain, text/html including
+#   nested sections. The multipart_full() function will not apply length
+#   restrictions. If there are length restrictions, then the message must
+#   be handled by main() or multipart().
+#
+def multipart_full(msg,opt,file):
+   '''Handle a multi-part message, including nesting and text/html/
+   Length restrictions may not be handled by this method.'''
+   # To create a multi-part nested message there are two options:
+   # 1. Walk the incoming message, delete unwanted sections,
+   #    sanitize payloads. This approach depends on APIs that allow
+   #    in-place modification of message contents.
+   # 2. Create a new message, copy headers and relevent sections
+   #    from the original message (recursively, sanitizing payloads).
+
+   # Approach 1
+
+   # Iterate through the contents of the message, recursively
+   process_parts(msg,opt)
+
+   # When forwarding a multi-part html message, do we insert a
+   # text/plain part at the beginning with the forward text?
+   # Should I add the forward text to the .preample between
+   # the end of the headers and the first multipart boundary?
+   # What if there is already a .preamble?
+   # It seems text added to preample is not often visible in a mail
+   # reader, however, based on the other things I have tried below,
+   # I think the best approach for now is to put some diagnostic
+   # info in the .epilogue
+   #
+   # if opt.forward:
+   fwd=" From: %s\n To: %s\n Date: %s\n " % (
+        msg["from"],msg["to"],msg["date"])
+   fwd += " ".join(sys.argv)	#DEBUG
+   fwd += "\n"
+
+   if msg.epilogue:
+      msg.epilogue=fwd+msg.epilogue
+   else:
+      msg.epilogue=fwd
+
+   #if msg.preamble:
+   #   msg.preamble=fwd+msg.preamble
+   #else:
+   #   msg.preamble=fwd
+
+   # The following seemed to work to the extent that it allowed me to
+   # add a text section to the start or end of the message, however,
+   # it did not display properly on the mail clients.
+   #	TODO: try adding an HTML section to beginning?
+   #
+   #	fwdmsg=email.message.Message()
+   #	fwdmsg=email.mime.text.MIMEText(fwd)
+   #	fwdmsg.set_payload(fwd)
+   #
+   # If we use .attach, it will be appended to the end of the
+   # message, which is not exactly what we want, also, it became
+   # the only part visible in some mail readers (thunderbird).
+   #
+   #	msg.attach(fwdmsg)
+   #
+   # If we put the text as the first section, it does not appear
+   # when viewing, because mail-readers prefer to show the html.
+   #
+   #	parts=[fwdmsg]+msg.get_payload()
+   #	msg.set_payload(parts)
+
+   # Iterate through the message headers
+   # TODO: see if it would be better to do this before
+   #       process_parts
+
+   # WARNING:  This logic duplicates output_msgheader
+   keys=msg.keys()	# modify while iterating....
+   for k in keys:
+      # Content type field needed.
+      if k.upper()[:8]=="CONTENT-":
+         continue
+      # Not sure if mime needed
+      elif k.upper()[:4]=="MIME":
+         continue
+      elif opt.forward:
+         if k.upper()[:7]!="SUBJECT":
+            # only the subject is included when forwarding
+            del msg[k]
+
+      # It seems to me that most signatures will not be valid either
+      # because the message is modified..... The MTA would have to
+      # re-sign the message based on the new content, right?
+      elif k.upper()[:9]=="DOMAINKEY":
+         del msg[k]
+      elif k.upper()[:4]=="DKIM":
+         del msg[k]
+      elif k.upper()[:13]=="AUTHENICATION":
+         del msg[k]
+      # Message destination is not included because it is assumed that
+      # a new destination will be provided when this message is passed
+      # to the MTA.
+      elif k.upper() == "TO":
+         del msg[k]
+      elif k.upper() == "DELIVERED-TO":
+         del msg[k]
+      elif opt.unaddressed:
+         # The unaddressed flag omits sender information from the message
+         # which might be required to pass certain message relays. If sender
+         # information is omitted here, then a new sending address will likely
+         # be added by MTA.
+         if k.upper() == "FROM":
+            del msg[k]
+         if k.upper() == "RETURN-PATH":
+            del msg[k]
+         if k.upper() == "SENDER":
+            del msg[k]
+
+   # Should I add a .epilogue with some results from the
+   # processing?
+
+   # Write the entire message to the output stream
+   # Not sure about performance of as_string() for very large
+   # messages. Seems like the correct way to do this is via a
+   # generator:
+   # https://docs.python.org/2/library/email.generator.html
+   #
+   gen=email.generator.Generator(file)
+   gen.flatten(msg)
+
+   return 0
+
+def process_parts(msg,opt):
+   '''Process a multi-part message.
+   Nested parts are handled recursively.
+   True is returned to indicate that there are still parts
+   remaining after processing. False indicates that all the
+   parts of a multi-part message were deleted.'''
+   # Assign to separate list, because we might be modifying msg while
+   # iterating.
+   parts = msg.get_payload()
+   orig_len=len(parts)
+   for i in xrange(len(parts)-1,-1,-1):
+      # iterate backwards to allow deletion in-place
+      part=parts[i]
+      if part.is_multipart():
+         # Nested
+         if process_parts(part,opt):
+            # Some valid sub-parts remain
+            continue	# leave part in
+
+         # There is nothing left in this part
+         del parts[i]
+         continue
+
+      # Not nested
+      content = part['Content-type']
+      # For now delete anything that is not text
+      # Note that this multipart_full is not used for opt.plain
+      # so we don't need to check that.
+      if content[:5] != 'text/':
+         del parts[i]
+         continue
+
+      # So, this part will remain.
+      if not opt.safe: continue
+
+      # Need to sanitize payload
+      payload = part.get_payload(decode=True)
+      newpay = cStringIO.StringIO()
+
+      # (safe,maxlen,allow_digits,allow_html,allow_otp,outstream,note)
+      mb=MsgBodyFilter(opt.safe,opt.maxlen,opt.digits,opt.allow,opt.otp,newpay)
+      mb.add_body(payload)
+      mb.close()
+      # Now newpay should contain sanitized payload.
+      # Question: do I need to fix charset or re-encode, based on the
+      # part["Content-Transfer-Encoding"] header?
+      # Currently, I see mainly: quoted-printable, 7bit, 8bit, base64
+      # It is not clear if set_payload will properly re-encode.
+      # https://docs.python.org/2/library/email.mime.html implies that
+      # .set_payload can re-encode in some cases.
+      # TODO: investigate, do some diffs of before and after.
+      # TODO: figure out if long lines will be a problem.
+      part.set_payload(newpay.getvalue())
+
+      # end of loop
+
+   if not parts:
+      # All parts were deleted
+      return False
+
+   # If some parts were removed, need to update the multi-part payload
+   # to reflect this.
+   if len(parts) != orig_len:
+      # TODO: test a bit then try this.
+      # msg.set_payload(parts)
+      diagout("TBD: Some parts deleted.")
+
+   return True
+   # END multipart_html
+
 def multipart(msg,opt,file=sys.stdout):
    '''Handle a multi-part message.
    Takes the message and the command-line options. Note options
    can be any Namespace or object which has the fields we want:
    safe, forward, plain, allow, digits, otp'''
 
-   if opt.forward:
-      forward_msg=msg
-   else:
-      forward_msg=None
+   # Note that I would like to change the semantics of the --allow
+   # and --plain slightly, to the following:
+   #
+   # - Default behaviour is to prefer text/plain and omit text/hmtl if
+   #   text/plain is available, but, show text/html if there is no text/plain.
+   #   - output could be multi-part if there is no text/plain
+   #
+   # --plain is to require text/plain and never include text/html
+   #   - always output a single-part message.
+   #
+   # --allow is to transmit both text/plain and text/html and the reader
+   #         will decides how to present. When --allow is used, the maxlen
+   #         is applied to each section, not the entire message.
+   #   - multi-part input will result in multi-part output.
 
+   if opt.allow:
+      # To support long messages, including html and nesting,
+      # we use the multipart_full() function.
+      return multipart_full(msg,opt,file)
+
+   # Walk the parts of the message, get plain, other text and count.
    (plain,other,total) = scantext(msg)
 
-   # TODO: handle opt.allow (allow other text/)
-   # To properly pass multiple parts we would need to compose
-   # a new multi-part message using each content type and payload
-   # from the original message, after obscuring each payload, if
-   # required.
+   if len(plain) == 0 and not opt.plain:
+      # No text/plain section. But opt.plain not required.
+      if len(other) > 0:
+         # Use multi-part logic for text/*
+         return multipart_full(msg,opt,file)
 
+   # Compose a single-part output message from the text/plain
+   # sections, if any. The other sections are ignored.
+
+   # (safe,maxlen,allow_digits,allow_html,allow_otp,outstream,note)
+   mb=MsgBodyFilter(opt.safe,opt.maxlen,opt.digits,opt.allow,opt.otp,file)
+
+   output_msgheader(msg,opt.forward,opt.unaddressed,file=file)
+   print(file=file)
    note=None
+
    if len(plain) == 0:
       # no plaintext portion
-
-      payload="none"
-      note="No text/plain in this %d part message" % (total)
+      mb.set_note("No text/plain in this %d part message" % (total))
+      mb.add_body("none")
       rc=3	# no text/plain
    else:
       payload=plain[0].get_payload(decode=True)
-
       rc=0
       if len(plain) == 1:
-         note="single text/plain of %d parts" % (total)
+         mb.set_note("single text/plain of %d parts" % (total))
+         mb.add_body(payload)
       else:
          # there are multiple plaintext portions in this message.
          #
          remaining=len(plain)-1
+         # currently .set_note must not be called more than once
+         mb.set_note("%d text/plain parts omitted." % (remaining))
+         mb.add_body(payload)
          for part in plain[1:]:
-            if len(payload) > opt.maxlen:
+            # TODO: look into 'comment' after each part.
+            payload = part.get_payload(decode=True)
+            if len(payload) > mb.remaining:
                rc=2	# truncated
-               note="%d text/plain parts omitted." % (remaining)
                break
+            mb.add_body(payload)
             remaining -= 1
-            payload += "\n---\n" + part.get_payload(decode=True)
- 
-   output_msgheader(msg,opt.forward,opt.unaddressed,file=file)
-   print(file=file)
-   output_msgbody(payload,opt,note=note,forward_msg=forward_msg,file=file)
+            mb.note="%d text/plain parts omitted." % remaining
+         mb.note="no further text/plain parts"
+
+   if opt.forward:
+      mb.add_forward(msg)
+
+   mb.add_body(payload)
+   mb.close()
    return rc
+
+   # END multipart
 
 # rc from main will be command exit code
 # 0 - normal
@@ -897,72 +1301,68 @@ main_rc_FAULT=6		# Failure.
 def main(args):
    import argparse
    parser = argparse.ArgumentParser(description=
- 	'''Extract safe text/plain from email. A single bank line is output
- 	between the headers and message body. Extra leading blank lines
- 	from message body are removed. Extra trailing blank lines from the
- 	message body are removed. Sequences of more than 2 blank links are
- 	collapsed to a single blank line. The stdout from this script should
- 	be passed to a message transport agent (MTA), for example sendmail.''')
+	'''Extract safe text/plain from email. A single bank line is output
+	between the headers and message body. Extra leading blank lines
+	from message body are removed. Extra trailing blank lines from the
+	message body are removed. Sequences of more than 2 blank links are
+	collapsed to a single blank line. The stdout from this script should
+	be passed to a message transport agent (MTA), for example sendmail.''')
 
    parser.add_argument('--safe','-s',action='store_true', help=
-  	'''Only allow text/plain to pass through and obscure any codes
-  	or URLs in the text. Note that text/html may be included by
-  	adding --allow option.''')
+	'''Obscure any codes or URLs in the text.''')
 
    parser.add_argument('--forward','-f',action='store_true', help=
-  	'''Operate in forward mode. Most email headers are stripped except
-  	for a subject line. Some headers (to,from) become part
-  	of the message body and may be reformated such that they cannot
-  	be used by an MTA. Because from/to are no longer included in headers,
-  	you must
-  	provide these when this message is passed to the MTA (sendmail).
-  	If this forward option is NOT included,
-  	the filter runs in relay/redirect mode in which case most or
-  	all of the headers are retained, including the subject, allowing
-  	the message to relayed by an MTA without providing additional information.''')
+	'''Operate in forward mode. Most email headers are stripped except
+	for a subject line. Some headers (to,from) become part of the message
+	body and may be reformated such that they cannot be used by an MTA.
+	Because from/to are no longer included in headers, you must provide
+	these when this message is passed to the MTA (sendmail).
+	If this forward option is NOT included, the filter runs in
+	relay/redirect mode in which case most of the headers are retained,
+	including the subject, allowing the message to relayed by an MTA.''')
 
    parser.add_argument('--unaddressed','-u',action='store_true', help=
 	'''Omit From/To from message header. The MTA must provide these.''')
 
    parser.add_argument('--plain','-p',action='store_true', help=
-  	'''Only allow text/plain content through filter. Note that a
+	'''Only allow text/plain content through filter. Note that a
 	single-part message with no content type indicated is assumed to be
-	text/plain content for historic reasons. The default behaviour,
-	when not in safe mode it is allow text/*''')
+	text/plain content for historic reasons. The default behaviour is
+	to prefer text/plain but allow text/html if no text/plain is in
+	the message.''')
 
    parser.add_argument('--allow','-a',action='store_true', help=
-  	'''Allow text/html sections even in safe mode, however, resulting
-  	html, after obscure, may be inconsistent. Has no effect without
-  	--safe, implies --digits, not compatible with --plain''')
+	'''Allow text/html sections along with text/plain sections.
+	The html code, after obscure, may be inconsistent.
+	Implies --digits, not compatible with --plain''')
 
    parser.add_argument('--digits','-d',action='store_true', help=
-  	'''Allow some digit characters through the text filter, as long
-  	as they don't look like a code. Has no effect without --safe''')
+	'''Allow some digit characters through the text filter, as long
+	as they don't look like a code. Has no effect without --safe''')
 
    parser.add_argument('--otp','-o',action='store_true', help=
-   	'''Allow what might be an OTP or TOTP or HOTP consisting of a string
-   	of up to 10 digits through the filter.
-   	You might use this because you actually want to allow an OTP
-   	through the filter, but, more likely you will use this because you
-   	are not worried about OTPs in this instance and you want to avoid
-   	obscuring some dates and phone numbers and you want to allow more
-   	of the text/html to work. Has no effect without --safe.''')
+	'''Allow what might be an OTP or TOTP or HOTP consisting of a string
+	of up to 10 digits through the filter.
+	You might use this because you actually want to allow an OTP
+	through the filter, but, more likely you will use this because you
+	are not worried about OTPs in this instance and you want to avoid
+	obscuring some dates and phone numbers and you want to allow more
+	of the text/html to work. Has no effect without --safe.''')
 
-   parser.add_argument('--maxlen','-m',action='store',type=int, default=60000, help=
-   	'''Set a maximum length of the output message body.''')
+   parser.add_argument('--maxlen','-m',action='store',type=int,
+                       default=300000, help=
+	'''Set a maximum length of the output message body.
+	Note that with --allow, there may be multiple message sections and
+	this limit may not work as expected.''')
 
    cmdargs=parser.parse_args(args)
 
    if cmdargs.allow:
       if cmdargs.plain:
-         raise UserWarning("--allow not compatible with --plain")
+         raise UsageError("--allow not compatible with --plain")
 
+      # For now, --allow will imply --digits
       cmdargs.digits=True
-
-   if cmdargs.safe:
-      # --safe implies --plain, unless --allow
-      if not cmdargs.allow:
-         cmdargs.plain=True
 
    msg=email.message_from_file(sys.stdin)
 
@@ -973,31 +1373,41 @@ def main(args):
    if msg.is_multipart():
       return multipart(msg,cmdargs)
 
-   if cmdargs.forward:
-      forward_msg=msg
-   else:
-      forward_msg=None
+   # Handle a single-part message here.
 
    contype=msg["Content-Type"]	# None if no content type
    #contype=msg.get_content_type()  # might be better?
    #print("contype:",contype,"maintype:",msg.get_content_maintype())
 
+   # Compose a single-part output message
+
+   # (safe,maxlen,allow_digits,allow_html,allow_otp,outstream,note)
+   mb=MsgBodyFilter(cmdargs.safe,cmdargs.maxlen,cmdargs.digits,cmdargs.allow,
+                    cmdargs.otp,sys.stdout)
+
    if contype == None:
       # No content type on message. For historic reasons this is not
       # an error. Older email systems and clients did not use content
-      # type. We will assume text/plain
+      # type. We will assume text/plain, however, we do not add any
+      # content type to our outgoing message.
       payload=msg.get_payload(decode=True)
       if isinstance(payload,str):
          output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
          print()
-         output_msgbody(payload,cmdargs,note='Unknown content type',
-         	forward_msg=forward_msg)
+
+         mb.set_note('Unknown content type')
+         if cmdargs.forward:
+            mb.add_forward(msg)
+
+         mb.add_body(payload)
+         mb.close()
+
          return main_rc_NOCONTENT
       else:
-         raise UserWarning("No content type or message playload: "+str(type(payload)))
+         raise sm_exception("No content type or message playload: "+str(type(payload)))
 
    if not isinstance(contype,str):
-      raise UserWarning("Unknown content type: "+str(type(contype)))
+      raise sm_exception("Unknown content type: "+str(type(contype)))
 
    #print("Content-Type:",type(contype))	#DEBUG
    textcontent=False
@@ -1007,37 +1417,59 @@ def main(args):
       pay1=msg.get_payload(decode=True)
       if contype[:10] == 'text/plain':
          # This is what we like to see.....
-         output_msgbody(pay1,cmdargs,forward_msg)
-         return 0
-      else:
-         # Content is text, but not plain. Probably html.
-         if cmdargs.allow:
-            output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
-            # but now, we need to put back mime/content type
-            # that output_msgheader does not include.
-            print("Content-Type:",contype)
-            print()
-            # Not sure it is valid to include non-html stuff
-            # so I might have to remove forward_msg
-            # yahoo webmail seems to render it correctly.
-            output_msgbody(pay1,cmdargs,forward_msg=forward_msg)
-         else:
-            output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
-            print()
-            output_msgbody("none",cmdargs,note="no text/plain in message",
-            	forward_msg=forward_msg)
+         # Compose a single-part message with the text/plain payload.
+         output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
+         if cmdargs.forward:
+            mb.add_forward(msg)
 
-         return main_rc_NOPLAIN
+         mb.add_body(pay1)
+         mb.close()
+
+         return 0
+      # Content is text, but not plain. Probably html.
+      if cmdargs.plain:
+         # Compose a single-part message, with just a note.
+
+         output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
+         print()
+         mb.set_note("no text/plain in message")
+         if cmdargs.forward:
+            mb.add_forward(msg)
+         mb.add_body("none")
+      else:
+         # Compose a single-part message, with the same content-type
+         # as the incoming message.
+
+         output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
+         print()
+         # Not sure it is valid to include non-html stuff
+         # so I might have to remove the forward stuff.
+         # yahoo webmail seems to render it correctly.
+         if cmdargs.forward:
+            mb.add_forward(msg)
+         mb.add_body(pay1)
+
+      mb.close()
+      return main_rc_NOPLAIN
 
    # This is not text
+   # Compose a single-part message, with just a note.
    output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
    print()
-   output_msgbody("none",cmdargs,note="no text in messsage",
-           forward_msg=forward_msg)
-
+   mb.set_note("no text in messsage")
+   if cmdargs.forward: mb.add_forward(msg)
+   mb.add_body("none")
+   mb.close()
    return main_rc_NOPLAIN
 
    # END main
 
 if __name__ == "__main__":
-   sys.exit(main(sys.argv[1:]))
+   # TODO: add a module_init function to make unit-testing easier?
+   #		- not much of anything to put in it at this point.
+
+   try:
+      sys.exit(main(sys.argv[1:]))
+   except sm_exception,e:
+      e.report()
+

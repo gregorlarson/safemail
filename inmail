@@ -82,7 +82,7 @@ fi
 
 if [ "$forward" ]; then
    # Sanitized the forwarded email, allow some html, but removing
-   # most emailed codes, coded URLs, verification links, OTP etc.
+   # most emailed codes, coded URLs, verification links.
 
    # TODO: put safemail on standard path
    # safemail is a python script that processes an email
@@ -91,7 +91,7 @@ if [ "$forward" ]; then
    #
    # see:  https://github.com/gregorlarson/safemail
    #
-   $HOME/bin/safemail -fsa < "$tmpfile" | $sendmail "$forward"
+   $HOME/bin/safemail -fsao < "$tmpfile" | $sendmail "$forward"
    sendmail_rc=$?
    if [ $sendmail_rc -ne 0 ]; then
       log "sendmail '$forward' rc=$sendmail_rc"
