@@ -17,7 +17,7 @@ Using email as a secondary authentication mechanism is really using email for so
 Many (if not most) users do not have a really close relationship with their personal email provider. End-users are enticed to choose free email providers that provide portability, high-availability, good user-experiece and very high storage limits. The big free providers in North America are Google, Microsoft, Apple and Yahoo. There are a number of smaller providers as well.  Because these email accounts are free, there may be no billing information that can be used to support identity.  Also, users are moving away from the ISP or employer provided email and using the free email as their primary personal email address. In many cases there may no good backup email address that can be used to recover their primary email address.
 #### Broken Authentication Chains
 Users may abandon an email address or phone number, sometimes without considering all the consequences. A free email account may be closed simply because the user no longer logs into it regularly. 
-When an email account or phone number is closed, the owner may forget that these addresses have the secondary use as an identity provider.
+When an email account or phone number is closed, the owner may forget that these addresses have the secondary use for authentication and identity.
 #### Accessing and Forwarding Email
 Users will often want their email forwarded to a facility and device that is convenient to them. This raises the primary security contradiction with email.
 > The user wants fast easy access to their email, and, we actually want them to have the fast, easy access in order that they may be informed and take actions based on that email.
@@ -26,7 +26,16 @@ Because email must be very available to be useful, it is also more exposed to th
 
 A person who checks their email 20 times a day is unlikely to enter a long password each time.
 
-For these reasons, an email access theft is often the first step in a ugly security breach. A device with access to the email is misplaced or stolen. A user forgets to log out or lock their terminal.  Often there is a social component where the executive who is the one who will act on an email message is not trained or thinking about system security.
+For these reasons, an email **access** theft is often the first step in a ugly security breach.  I consider an email **access* theft a situation where the user does not loose full control of their email account, however, the contents of their email become accessible by an attacker:
+   - A device with access to the email is misplaced or stolen.
+   - A user forgets to log out or lock their terminal.
+   - The user uses forwarding rules to access their mail in different situations.
+   - Often there is a social component where the executive who is the one who will act on an email message is not trained or thinking about system security.
+
+The email provider likely understands that simple access to email contents should not enable take-over of the entire email account. The more sophisticated email providers use mutli-factor, application specific passwords and other mechanisms to prevent take-over of the account.
+
+If, however, the email address is being used by a 3rd-party provider as an authentication mechanism, we have an exposure. The attacker can use their there temporary access to the email or order to elevate their access, reset the account password and take over the 3rd party account.
+
 ### The Ugly
 You have strong system passwords, safely stored in a good password vault, that you never use on an insecure device, never cache in a browser. Perhaps you even use multi-factor authentication...
 You may still be exposed to the email based account-attack.
