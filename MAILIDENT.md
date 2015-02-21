@@ -42,4 +42,7 @@ You may still be exposed to the email based account-attack.
 
 > Even if you have not changed your password in years, and have logged into a system regularly and recently, you might be unpleasantly surprised at what happens when some attacker clicks the I-Forgot-My-Password link.
 
-Many providers will simply send the password-reset link to the email address they have on file for you. Sometimes they will ask a personal question, but not always. Sometimes they will ask for the email address associated with the account, which is not an effective security measure. The attacker often already has access to an email account and it trying to use that email account to execute an account takeover.
+This is another peeve of mine. For many providers, the Forgot-My-Password link would be more aptly named the *take*
+*control* *of* *account* *using* *E-Mail* link. Often the provider does not have, or use, available information to figure out if you **really** forgot your password, or if there is something else going on.
+
+Many providers will simply send the password-reset link to the email address they have on file for you. Sometimes they will ask a personal question, but not always. Sometimes they will ask for the email address associated with the account, which is not an effective security measure. The attacker often already has access to an email account and it trying to use that email account to elevate their access and execute an account takeover.
