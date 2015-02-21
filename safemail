@@ -921,14 +921,25 @@ def output_msgheader(msg,forward_mode,unaddressed,file=sys.stdout):
    the message header, prior to the body of the message.'''
 
    # WARNING: some logic here is duplicated in multipart_full()
+
    if forward_mode:
-      print("Subject:",msg['subject'],file=file)
-      return	# only the subject is included
+      for (k,v) in msg.items():
+         # In the forward case, we keep only a few fields necessary to
+         # display the content.
+         if k.upper()[:7] == "SUBJECT":
+            print("%s:" % (k),v,file=file)
+         elif k.upper()[:12]=="CONTENT-TYPE":
+            print("%s:" % (k),v,file=file)
+         elif k.upper()[:4]=="MIME":
+            print("%s:" % (k),v,file=file)
+
+      return
 
    # Problem: forward_mode is omitting some MIME and CONTENT- that is
    # needed when forwarding a single-part text/html message.
 
    for (k,v) in msg.items():
+
       # Leave in mime and content
       #if k.upper()[:8]=="CONTENT-": continue
       #if k.upper()[:4]=="MIME": continue
