@@ -1462,7 +1462,9 @@ def main(args):
          return 0
       # Content is text, but not plain. Probably html.
       if cmdargs.plain:
-         # Compose a single-part message, with just a note.
+         # Only plain output is allowed, so compose a single-part
+         # message, with just a note indicating that we could not
+         # transmit this message. The subject will be visible.
 
          output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
          print()
