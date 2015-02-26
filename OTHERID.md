@@ -21,7 +21,7 @@ understand how it is being used to authenticate to other providers.
   reason.
 
 ## [OAUTH]
-
+tbd
 ## Multi-factor
 Mutli-factor genericly 
 ### Multi-factor using Phone Number
@@ -47,6 +47,7 @@ This mechanism has significant advantages but some disadvantages.
    - because the key is installed on a mobile device, the key may become
    unavailable because the mobile device can more easily be lost or damaged
    and may be more difficult to back-up.
+
 ## Account Recovery Key
 Some of the more sophisticated providers (Microsoft and probably others) now allow members to
 recover access to your account using a recovery key. This recovery key is generated when
