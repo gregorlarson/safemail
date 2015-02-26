@@ -129,12 +129,17 @@ class MsgBodyFilter:
          self.note_len=0
 
    def add_forward(self,msg):
-      '''Add some fields from original message header to the message body.'''
-      # In forward mode, some fields from the source message
-      # are included in the new message body.
-      # No hiding is done on these fields.
-      # The amount of detail included depends on the space remaining
-      # in the message.
+      '''Add some fields from original message header to the message body.
+      In forward mode, some fields from the source message are included in
+      the new message body.  No hiding is done on these fields.
+      The amount of detail included depends on the space remaining
+      in the message.
+      Note that no leading blank line is output, so if this is
+      the beginning of the message body, the caller must output
+      the blank line following the header.
+      A final blank line IS included, however'''
+
+      #
       # print(msg.keys())	#DEBUG
       if self.remaining > 120:
          extra="From: "+msg['from']
@@ -906,7 +911,8 @@ def hidecodes(txt):
 
    return txt
 
-def output_msgheader(msg,forward_mode,unaddressed,file=sys.stdout):
+def output_msgheader(msg,forward_mode,unaddressed, msg_part,
+                     file=sys.stdout):
    '''Output the email header, given an existing message.
    This can be used to compose a single-part message based on content
    from an existing message.  For more sophisticated messages,
@@ -920,51 +926,72 @@ def output_msgheader(msg,forward_mode,unaddressed,file=sys.stdout):
    provided. Note that the CALLER must output a blank line after
    the message header, prior to the body of the message.'''
 
+   # If we are redirecting or forwarding part of a multi-part message,
+   # then we need to use information from the part we are forwarding as
+   # well as the envelope (top level message).
+
    # WARNING: some logic here is duplicated in multipart_full()
 
    if forward_mode:
+      # In the forward case, we keep only a few fields from the main
+      # and message part necessary to display the content.
       for (k,v) in msg.items():
-         # In the forward case, we keep only a few fields necessary to
-         # display the content.
-         if k.upper()[:7] == "SUBJECT":
+         u=k.upper()
+         # From the envelope, we will keep the subject and MIME headers.
+         if u[:7] == "SUBJECT":
             print("%s:" % (k),v,file=file)
-         elif k.upper()[:12]=="CONTENT-TYPE":
+         elif u[:4]=="MIME":
             print("%s:" % (k),v,file=file)
-         elif k.upper()[:4]=="MIME":
+
+      for (k,v) in msg_part.items():
+         u=k.upper()
+         # From the selected message part, we keep the content-type.
+         # If we keep any encoding info, then we might need to encode
+         # the message body later? (Content-Transfer-Encoding:)
+         if u[:12]=="CONTENT-TYPE":
             print("%s:" % (k),v,file=file)
 
       return
 
-   # Problem: forward_mode is omitting some MIME and CONTENT- that is
-   # needed when forwarding a single-part text/html message.
-
+   # In redirect/relay mode, we keep more of the headers from the
+   # envelope.
    for (k,v) in msg.items():
+      u=k.upper()
+      # Leave in mime, but not content-type or encoding, because we will
+      # get those from the selected message part.
 
-      # Leave in mime and content
-      #if k.upper()[:8]=="CONTENT-": continue
-      #if k.upper()[:4]=="MIME": continue
+      #if u[:4]=="MIME": continue
+      if u[:8]=="CONTENT-": continue
 
       # It seems to me that most signatures will not be valid either
       # because the message is modified..... The MTA would have to
       # re-sign the message based on the new content, right?
-      if k.upper()[:9]=="DOMAINKEY": continue
-      if k.upper()[:4]=="DKIM": continue
-      if k.upper()[:13]=="AUTHENICATION": continue
+      if u[:9]=="DOMAINKEY": continue
+      if u[:4]=="DKIM": continue
+      if u[:13]=="AUTHENICATION": continue
       # Message destination is not included because it is assumed that
       # a new destination will be provided when this message is passed
       # to the MTA.
-      if k.upper() == "TO": continue
-      if k.upper() == "DELIVERED-TO": continue
+      if u == "TO": continue
+      if u == "DELIVERED-TO": continue
       if unaddressed:
          # The unaddressed flag omits sender information from the message
          # which might be required to pass certain message relays. If sender
          # information is omitted here, then a new sending address will likely
          # be added by MTA.
-         if k.upper() == "FROM": continue
-         if k.upper() == "RETURN-PATH": continue
-         if k.upper() == "SENDER": continue
+         if u == "FROM": continue
+         if u == "RETURN-PATH": continue
+         if u == "SENDER": continue
 
       print("%s:" % (k),v,file=file)
+
+   for (k,v) in msg_part.items():
+      u=k.upper()
+      # From the selected message part, we keep the content-type.
+      # If we keep any encoding info, then we might need to encode
+      # the message body later? (Content-Transfer-Encoding:)
+      if u[:12]=="CONTENT-TYPE":
+         print("%s:" % (k),v,file=file)
 
    # END output_msgheader
 
@@ -1080,43 +1107,44 @@ def multipart_full(msg,opt,file):
    # WARNING:  This logic duplicates output_msgheader
    keys=msg.keys()	# modify while iterating....
    for k in keys:
+      u=k.upper()
       # Content type field needed.
-      if k.upper()[:8]=="CONTENT-":
+      if u[:8]=="CONTENT-":
          continue
       # Not sure if mime needed
-      elif k.upper()[:4]=="MIME":
+      elif u[:4]=="MIME":
          continue
       elif opt.forward:
-         if k.upper()[:7]!="SUBJECT":
+         if u[:7]!="SUBJECT":
             # only the subject is included when forwarding
             del msg[k]
 
       # It seems to me that most signatures will not be valid either
       # because the message is modified..... The MTA would have to
       # re-sign the message based on the new content, right?
-      elif k.upper()[:9]=="DOMAINKEY":
+      elif u[:9]=="DOMAINKEY":
          del msg[k]
-      elif k.upper()[:4]=="DKIM":
+      elif u[:4]=="DKIM":
          del msg[k]
-      elif k.upper()[:13]=="AUTHENICATION":
+      elif u[:13]=="AUTHENICATION":
          del msg[k]
       # Message destination is not included because it is assumed that
       # a new destination will be provided when this message is passed
       # to the MTA.
-      elif k.upper() == "TO":
+      elif u == "TO":
          del msg[k]
-      elif k.upper() == "DELIVERED-TO":
+      elif u == "DELIVERED-TO":
          del msg[k]
       elif opt.unaddressed:
          # The unaddressed flag omits sender information from the message
          # which might be required to pass certain message relays. If sender
          # information is omitted here, then a new sending address will likely
          # be added by MTA.
-         if k.upper() == "FROM":
+         if u == "FROM":
             del msg[k]
-         if k.upper() == "RETURN-PATH":
+         if u == "RETURN-PATH":
             del msg[k]
-         if k.upper() == "SENDER":
+         if u == "SENDER":
             del msg[k]
 
    # Should I add a .epilogue with some results from the
@@ -1244,7 +1272,9 @@ def multipart(msg,opt,file=sys.stdout):
    # (safe,maxlen,allow_digits,allow_html,allow_otp,outstream,note)
    mb=MsgBodyFilter(opt.safe,opt.maxlen,opt.digits,opt.allow,opt.otp,file)
 
-   output_msgheader(msg,opt.forward,opt.unaddressed,file=file)
+   # Note that the content-type from the first text/plain part is
+   # used in the message header.
+   output_msgheader(msg,opt.forward,opt.unaddressed,plain[0],file=file)
    print(file=file)
    note=None
 
@@ -1392,7 +1422,10 @@ def main(args):
       # content type to our outgoing message.
       payload=msg.get_payload(decode=True)
       if isinstance(payload,str):
-         output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
+         # In this case, we use the envelope as the message part
+         # in case any extra fields are needed. This is why msg
+         # appears twice in this call.
+         output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed,msg)
          print()
 
          mb.set_note('Unknown content type')
@@ -1418,7 +1451,8 @@ def main(args):
       if contype[:10] == 'text/plain':
          # This is what we like to see.....
          # Compose a single-part message with the text/plain payload.
-         output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
+         output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed,msg)
+         print()
          if cmdargs.forward:
             mb.add_forward(msg)
 
