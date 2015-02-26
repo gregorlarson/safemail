@@ -1466,7 +1466,7 @@ def main(args):
          # message, with just a note indicating that we could not
          # transmit this message. The subject will be visible.
 
-         output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
+         output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed,msg)
          print()
          mb.set_note("no text/plain in message")
          if cmdargs.forward:
@@ -1476,7 +1476,7 @@ def main(args):
          # Compose a single-part message, with the same content-type
          # as the incoming message.
 
-         output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
+         output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed,msg)
          print()
          # Not sure it is valid to include non-html stuff
          # so I might have to remove the forward stuff.
@@ -1490,9 +1490,11 @@ def main(args):
 
    # This is not text
    # Compose a single-part message, with just a note.
-   output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed)
+   # Override the content-type (leave it empty for now).
+   dummy_msg=dict()
+   output_msgheader(msg,cmdargs.forward,cmdargs.unaddressed,dummy_msg)
    print()
-   mb.set_note("no text in messsage")
+   mb.set_note("no text in messsage (%s) " % contype)
    if cmdargs.forward: mb.add_forward(msg)
    mb.add_body("none")
    mb.close()
