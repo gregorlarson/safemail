@@ -1,7 +1,9 @@
 # safemail
 Sanitize email contents for forwarding to less secure zone or SMS.
 # Background
-Refer to [Mail Identity](MAILIDENT.md) discussion (rant).
+  - Refer to [Mail Identity](MAILIDENT.md) discussion (rant).
+  - Also see [Other ID] (OTHERID.md) for discussion other identity options.
+
 # How Safemail Can Protect your Account from an Email Takeover
 Safemail allows you to *lock-down* an important email address and then forward santizied messages to less secure zones. In this way, the people who need to see the email can read it on whatever device they choose, but the forwarded emails do not have sufficient information for someone to assume ownership of the account.
 
