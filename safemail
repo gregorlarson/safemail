@@ -141,20 +141,23 @@ class MsgBodyFilter:
 
       #
       # print(msg.keys())	#DEBUG
-      if self.remaining > 120:
-         extra="From: "+msg['from']
+      frm=msg['from']
+      if frm and (self.remaining > 120):
+         extra="From: "+frm
          elen=len(extra)+1
          print(extra,file=self.outstream)
          self.remaining -= elen
 
-         if self.remaining > 200:
-            extra="To: "+msg['to']
+         t=msg['to']
+         if t and (self.remaining > 200):
+            extra="To: "+t
             elen=len(extra)+1
             print(extra,file=self.outstream)
             self.remaining -= elen
 
-            if self.remaining > 360:
-               extra="Date: "+msg['date']
+            d=msg['date']
+            if d and (self.remaining > 360):
+               extra="Date: "+d
                elen=len(extra)+1
                print(extra,file=self.outstream)
                self.remaining -= elen
