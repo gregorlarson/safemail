@@ -24,17 +24,19 @@ Users will often want their email forwarded to a facility and device that is con
 An email address which is only available at a secure terminal in the office quickly becomes less useful, and there is a cascading effect where the less often an email address is checked, the less important email is sent there.
 Because email must be very available to be useful, it is also more exposed to theft.
 
-A person who checks their email 20 times a day is unlikely to enter a long password each time.
+A person who checks their email 20 times a day is unlikely to enter a long password each time, especially using a
+mobile touch-screen.
 
 For these reasons, an email **access** theft is often the first step in a ugly security breach.  I consider an email *access* theft a situation where the user does not loose full control of their email account, however, the contents of their email become accessible (for some period of time) by an attacker:
    - A device with access to the email is misplaced or stolen.
    - A user forgets to log out or lock their terminal or browser.
    - The user uses forwarding rules to access their mail in different situations.
-   - Often there is a social component where the executive who is the one who will act on an email messages (and therefor must get them promptly) is not trained or thinking about system security.
+   - Often there is a social component where the executive who is the one who will act on important email (and therefor must get them promptly), is not trained or thinking about system security.
 
-The email provider likely understands that simple access to email contents should not enable take-over of the entire email account. The more sophisticated email providers use mutli-factor, application specific passwords and other mechanisms to prevent take-over of the account.
+The email provider likely understands that simple access to email contents should not enable take-over of the entire email account. The more sophisticated email providers use mutli-factor, application specific passwords and other mechanisms to prevent take-over of the account. These protect the email account from take-over but do not offer
+good protection to other Providers using the email account for authentication.
 
-If, however, the email address is being used by a 3rd-party provider as an authentication mechanism, we have a serious exposure. The attacker can use their there temporary access to the email or order to elevate their access, reset the account password and take over the 3rd party account.
+If the compromised email address is being used by a 3rd-party provider as an authentication mechanism, we have a problem. The attacker can use their their temporary access to incoming email to elevate their access, reset the account password and take over the 3rd party account.
 
 ### The Ugly
 You have strong system passwords, safely stored in a good password vault, that you never use on an insecure device, never cache in a browser. Perhaps you even use multi-factor authentication...
