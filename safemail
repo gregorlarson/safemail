@@ -26,7 +26,7 @@
 '''
 
 from __future__ import print_function
-import os,sys,random,cStringIO,email
+import os,sys,random,time,cStringIO,email
 import email.generator
 #import email.mime.text		# not used for now
 
@@ -45,6 +45,13 @@ def diagout(*s,**k):
 
  file=k.get('file')
  if not file: file=stderr	# default to global stderr
+
+ # TODO: support a ts=True to include a yy-mm-dd hh:mm:ss prefix
+ ts=k.get('ts')
+ if ts:
+    t=time.localtime()
+    out="%02d-%02d-%02d %02d:%02d:%02d %s" % (
+     t.tm_year % 100,t.tm_mon,t.tm_mday,t.tm_hour,t.tm_min,t.tm_sec,out)
 
  print(out,file=file)
  e=k.get('exception')
@@ -923,7 +930,7 @@ def output_msgheader(msg,forward_mode,unaddressed, msg_part,
    In forward_mode=True, only the Subject header is output, so additional
    information must be provided to the the MTA in order to send this message.
    In relay/redirect mode (forward_mode=False) more message headers
-   are output. The Content-type is not included, nor is the destination.
+   are output. The Content-Type is not included, nor is the destination.
    Depending on the unaddressed flag, the source may also be omitted.
    When passing this message to the MTA, a new destination must be
    provided. Note that the CALLER must output a blank line after
@@ -1021,10 +1028,17 @@ def scantext(msg):
    for part in msg.walk():
       total += 1
       ct=part["Content-Type"]
-      if ct[:10] == 'text/plain':
+      # If I get a message part with no content type, how do I want to handle
+      # that? Does this even happen? I found an old error log indicating
+      # ct was NoneType. Not sure of exact scenario / test that was running.
+      #
+      if not ct:
+         diagout("Scantext part with no Content-Type ignored.",ts=True)
+      elif ct[:10] == 'text/plain':
          pt.append(part)
       elif ct[:4] == 'text':
          other.append(part)
+
    return (pt,other,total)
 
 #
@@ -1188,7 +1202,7 @@ def process_parts(msg,opt):
          continue
 
       # Not nested
-      content = part['Content-type']
+      content = part['Content-Type']
       # For now delete anything that is not text
       # Note that this multipart_full is not used for opt.plain
       # so we don't need to check that.
@@ -1229,7 +1243,7 @@ def process_parts(msg,opt):
    if len(parts) != orig_len:
       # TODO: test a bit then try this.
       # msg.set_payload(parts)
-      diagout("TBD: Some parts deleted.")
+      diagout("TBD: Some parts deleted.",ts=True)
 
    return True
    # END multipart_html
