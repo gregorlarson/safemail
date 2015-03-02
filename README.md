@@ -1,6 +1,8 @@
 # safemail
 Sanitize email contents for forwarding to less secure zone or SMS.
-# Background
+## Project Status
+In (small) production. Still testing out some things. Feedback welcome.
+## Background
   - Refer to [Mail Identity](MAILIDENT.md) discussion (rant).
   - Also see [Other ID] (OTHERID.md) for discussion other identity options.
 
