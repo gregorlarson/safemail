@@ -91,7 +91,7 @@ if [ "$forward" ]; then
    #
    # see:  https://github.com/gregorlarson/safemail
    #
-   $HOME/bin/safemail -fsao < "$tmpfile" | $sendmail "$forward"
+   $HOME/bin/safemail -fso < "$tmpfile" | $sendmail "$forward"
    sendmail_rc=$?
    if [ $sendmail_rc -ne 0 ]; then
       log "sendmail '$forward' rc=$sendmail_rc"
