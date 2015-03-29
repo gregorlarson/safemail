@@ -30,7 +30,7 @@ log() {
      echo "$d $*"
   else
      # if no log file, then use syslog
-     logger -t mail "inmail: $*"
+     logger -p mail.info -t inmail "$*"
   fi
 }
 
